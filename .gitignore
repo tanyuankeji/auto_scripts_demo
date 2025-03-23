@@ -5,6 +5,12 @@
 
 # Other files and folders
 ./*/.cursorrules
+# ./autoregfile/.cursorrules
+# ./autosgdc/.cursorrules
+# ./autotest/.cursorrules
+# ./autowire/.cursorrules
+./cursorrules
+
 
 # Executables
 *.swf
