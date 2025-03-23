@@ -9,15 +9,3 @@
 ./autotest/.cursorrules
 ./autowire/.cursorrules
 ./cursorrules
-
-
-# Executables
-*.swf
-*.air
-*.ipa
-*.apk
-*.swp
-*.log
-*.fsdb
-
-
