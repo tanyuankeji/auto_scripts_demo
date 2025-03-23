@@ -1,0 +1,18 @@
+# Build and Release Folders
+./build
+./tests
+./autowire.egg-info
+
+# Other files and folders
+./*/.cursorrules
+
+# Executables
+*.swf
+*.air
+*.ipa
+*.apk
+*.swp
+*.log
+*.fsdb
+
+
