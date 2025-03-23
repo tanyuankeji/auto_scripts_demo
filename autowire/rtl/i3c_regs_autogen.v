@@ -1,0 +1,21 @@
+// 自动生成的wire声明
+wire exp_oread_err;
+wire d_reset_r;
+wire allow_irq;
+wire ev_chg_ok;
+wire ev_allowed;
+wire ibi_map_idx;
+wire addrs;
+wire is_slv_done;
+wire is_mst_done;
+wire ccc_max;
+wire custim;
+wire rstact_tim;
+wire i2c_revision;
+wire wrda_map;
+wire map_writes;
+wire static_10b;
+wire [0:0] last_ns;
+wire daa_mrr_rd;
+wire map_daa_mmr;
+wire ibi_fifo_mux;

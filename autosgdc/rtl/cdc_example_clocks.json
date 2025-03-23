@@ -1,0 +1,14 @@
+{
+  "clk_fast": {
+    "period": 10.0,
+    "uncertainty": 0.5,
+    "waveform": [0, 5],
+    "generated": false
+  },
+  "clk_slow": {
+    "period": 40.0,
+    "uncertainty": 2.0,
+    "waveform": [0, 20],
+    "generated": false
+  }
+} 

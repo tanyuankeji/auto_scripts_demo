@@ -1,0 +1,78 @@
+//==============================================================================
+// Auto-generated SGDC file for Spyglass CDC analysis
+// Module: cdc_example
+// Generated: 2025-03-23 10:55:28
+// Generator: AutoSGDC v2.0
+//==============================================================================
+
+//------------------------------------------------------------------------------
+// 时钟定义 (Clock Definitions)
+//------------------------------------------------------------------------------
+create_clock -name clk_fast -period 10.0 -waveform {0 5.0} [get_ports clk_fast]
+create_clock -name clk_slow -period 10.0 -waveform {0 5.0} [get_ports clk_slow]
+
+//------------------------------------------------------------------------------
+// 时钟不确定性 (Clock Uncertainty)
+//------------------------------------------------------------------------------
+set_clock_uncertainty 0.5 [get_clocks clk_fast]
+set_clock_uncertainty 0.5 [get_clocks clk_slow]
+
+//------------------------------------------------------------------------------
+// 异步时钟组 (Asynchronous Clock Groups)
+//------------------------------------------------------------------------------
+set_clock_groups -asynchronous -group {clk_fast} -group {clk_slow}
+
+# 注意: 如果某些时钟是同步的，请移除它们并创建单独的时钟组
+# 例如: 如果clk1和clk2是同步的，但与clk3异步:
+# set_clock_groups -asynchronous -group {clk1 clk2} -group {clk3}
+
+//------------------------------------------------------------------------------
+// 跨时钟域信号约束 (Clock Domain Crossing Constraints) - 未检测到CDC
+//------------------------------------------------------------------------------
+# 未检测到跨时钟域信号，或CDC信号已有同步器
+# 如果您知道存在CDC路径，请手动添加约束:
+# set_cdc_signal -src_clock clk_fast -dst_clock clk_slow [get_nets <signal_name>]
+# set_cdc_property -type async -from clk_fast -to clk_slow
+
+//------------------------------------------------------------------------------
+// 虚假路径排除 (False Path Exclusions)
+//------------------------------------------------------------------------------
+# 如果某些跨时钟域路径不需要进行时序分析，可以设置为虚假路径
+# set_false_path -from [get_clocks clk_fast] -to [get_clocks clk_slow]
+# set_false_path -from [get_clocks clk_slow] -to [get_clocks clk_fast]
+
+//------------------------------------------------------------------------------
+// 多周期路径 (Multicycle Paths)
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// 输入延迟 (Input Delays)
+//------------------------------------------------------------------------------
+# 设置相对于时钟的输入延迟
+# 默认输入延迟: 最大 = 3.0ns, 最小 = 1.0ns
+# set_input_delay -clock clk_fast -max 3.0 [get_ports <input_port>]
+# set_input_delay -clock clk_fast -min 1.0 [get_ports <input_port>]
+
+# 控制信号输入延迟
+# set_input_delay -clock clk_fast -max 3.0 [get_ports {cdc_example/control*}]
+
+# 数据信号输入延迟
+# set_input_delay -clock clk_fast -max 3.0 [get_ports {cdc_example/data*}]
+
+//------------------------------------------------------------------------------
+// 输出延迟 (Output Delays)
+//------------------------------------------------------------------------------
+# 设置相对于时钟的输出延迟
+# 默认输出延迟: 最大 = 3.0ns, 最小 = 1.0ns
+# set_output_delay -clock clk_fast -max 3.0 [get_ports <output_port>]
+# set_output_delay -clock clk_fast -min 1.0 [get_ports <output_port>]
+
+# 控制信号输出延迟
+# set_output_delay -clock clk_fast -max 3.0 [get_ports {cdc_example/control*}]
+
+# 数据信号输出延迟
+# set_output_delay -clock clk_fast -max 3.0 [get_ports {cdc_example/data*}]
+
+//==============================================================================
+// 结束 (End of File)
+//==============================================================================

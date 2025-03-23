@@ -3,187 +3,52 @@
 """
 Verilog自动线网声明工具 (Auto Wire Generator)
 用途：自动检测Verilog代码中未声明的信号，并生成相应的wire声明
-作者：AI助手
-版本：1.1.0
+版本：1.3.0
 """
 
 import re
 import sys
 import os
+import json
 import argparse
 from typing import List, Dict, Set, Tuple, Optional
-from collections import OrderedDict
+import traceback
 
-# Verilog/SystemVerilog保留关键字集合
-VERILOG_KEYWORDS = {
-    "module", "endmodule", "input", "output", "inout", "assign", "always", "always_ff",
-    "always_comb", "always_latch", "if", "else", "case", "endcase", "begin", "end", 
-    "wire", "reg", "logic", "parameter", "localparam", "function", "endfunction", "task",
-    "endtask", "for", "while", "repeat", "forever", "default", "posedge", "negedge",
-    "or", "and", "not", "xor", "nor", "nand", "xnor", "buf", "signed", "unsigned"
-}
+from autowire.core.parser import VerilogParser
+from autowire.core.utils import ParseError
 
-def remove_comments(line: str) -> str:
-    """移除代码中的注释"""
-    line = re.sub(r'//.*', '', line)  # 移除单行注释
-    line = re.sub(r'/\*.*?\*/', '', line, flags=re.DOTALL)  # 移除多行注释
-    return line
-
-def extract_bitwidth(file_content: str, signal_name: str) -> Optional[str]:
+def load_config(config_file: Optional[str] = None) -> Dict[str, Any]:
     """
-    从文件内容中提取信号位宽
+    加载配置文件
     
     参数:
-        file_content: 文件内容字符串
-        signal_name: 需要提取位宽的信号名
+        config_file: 配置文件路径，如果为None则使用默认路径
         
     返回:
-        位宽字符串，如"[7:0]"，如果无法确定返回None
+        配置字典
     """
-    # 查找参数定义，如 parameter WIDTH = 8
-    param_pattern = re.compile(r'parameter\s+(\w+)\s*=\s*(\d+)')
-    params = {name: value for name, value in param_pattern.findall(file_content)}
-    
-    # 查找信号使用位宽的地方
-    patterns = [
-        # 例如：assign data[7:0] = value;
-        re.compile(rf'{signal_name}\s*\[(\d+):(\d+)\]'),
-        # 例如：assign data[WIDTH-1:0] = value;
-        re.compile(rf'{signal_name}\s*\[(\w+)\s*-\s*1\s*:\s*0\]'),
-        # 例如：assign data[0] = value; (单比特)
-        re.compile(rf'{signal_name}\s*\[(\d+)\]')
-    ]
-    
-    for pattern in patterns:
-        matches = pattern.findall(file_content)
-        if matches:
-            # 处理第一个匹配
-            if len(matches[0]) == 2:  # 范围 [x:y]
-                high, low = matches[0]
-                # 如果是参数，尝试替换
-                if high in params:
-                    high = params[high]
-                if low in params:
-                    low = params[low]
-                return f"[{high}:{low}]"
-            elif len(matches[0]) == 1:  # 单比特 [x]
-                return "[0:0]"  # 转换为范围格式
-    
-    # 尝试从输入信号定义推断
-    input_pattern = re.compile(rf'input\s+(?:\[\s*(\d+)\s*:\s*(\d+)\s*\])?\s*{signal_name}')
-    output_pattern = re.compile(rf'output\s+(?:\[\s*(\d+)\s*:\s*(\d+)\s*\])?\s*{signal_name}')
-    
-    for pattern in [input_pattern, output_pattern]:
-        match = pattern.search(file_content)
-        if match and match.group(1) and match.group(2):
-            return f"[{match.group(1)}:{match.group(2)}]"
-    
-    return None
-
-def parse_verilog(file_name: str, extract_width: bool = False) -> Tuple[List[str], Dict[str, Optional[str]]]:
-    """
-    解析Verilog文件，提取未定义的信号，保持出现顺序
-    
-    参数:
-        file_name: Verilog文件路径
-        extract_width: 是否提取信号位宽
+    if config_file is None:
+        # 默认配置文件路径
+        default_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'auto_wire_config.json'),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0]))), 'config', 'auto_wire_config.json'),
+            os.path.join(os.getcwd(), 'config', 'auto_wire_config.json')
+        ]
         
-    返回:
-        未定义信号列表和信号位宽字典的元组
-    """
+        for path in default_paths:
+            if os.path.exists(path):
+                config_file = path
+                break
+        else:
+            return {}
+    
     try:
-        with open(file_name, 'r') as file:
-            content = file.read()
-            lines = content.splitlines()
-    except FileNotFoundError:
-        print(f"错误：未找到文件 {file_name}")
-        sys.exit(1)
-
-    # 使用OrderedDict保持信号出现的顺序
-    signals_ordered = OrderedDict()
-    defined_signals = set()
-    module_names = set()
-    module_instance_signals = set()
-    instance_module_names = []
-    parameter_values = {}  # 存储parameter定义值
-
-    # 定义正则表达式
-    signal_pattern = re.compile(r'\b(\w+)\b')
-    
-    # 信号定义模式
-    define_patterns = [
-        re.compile(r'\b(?:wire|reg|logic)\s+(?:\[\s*[\w\d\-\+:\s]+\])?\s*(\w+)'),
-        re.compile(r'\binput\s+(?:\[\s*[\w\d\-\+:\s]+\])?\s*(\w+)'),
-        re.compile(r'\boutput\s+(?:\[\s*[\w\d\-\+:\s]+\])?\s*(\w+)'),
-        re.compile(r'\binout\s+(?:\[\s*[\w\d\-\+:\s]+\])?\s*(\w+)')
-    ]
-    
-    # 参数定义模式
-    param_pattern = re.compile(r'\b(?:parameter|localparam)\s+(\w+)\s*=\s*([^,;]+)')
-    
-    # 模块实例化模式
-    instance_pattern = re.compile(r'\.(\w+)')
-    module_pattern = re.compile(r'\bmodule\s+(\w+)')
-    
-    instance_module_patterns = [
-        re.compile(r'(\w+)\s+\w+\s\(\.\w+'),
-        re.compile(r'\w+\s+(\w+)\s\(\.\w+'),
-        re.compile(r'(\w+)\s+(\w+)\s*\(')
-    ]
-
-    # 处理每一行
-    for line in lines:
-        line = remove_comments(line)
-        
-        # 1. 收集所有可能的标识符，保持顺序
-        for signal in signal_pattern.findall(line):
-            # 将每个信号添加到OrderedDict，键为信号名，值不重要
-            if signal not in signals_ordered:
-                signals_ordered[signal] = True
-        
-        # 2. 识别已定义的信号
-        for pattern in define_patterns:
-            defined_signals.update(pattern.findall(line))
-        
-        # 3. 收集模块实例化信号
-        module_instance_signals.update(instance_pattern.findall(line))
-        
-        # 4. 识别模块名和实例模块名
-        for pattern in instance_module_patterns:
-            instance_module_names.extend(pattern.findall(line))
-            
-        module_match = module_pattern.search(line)
-        if module_match:
-            module_names.add(module_match.group(1))
-            
-        # 5. 收集参数定义
-        for name, value in param_pattern.findall(line):
-            parameter_values[name] = value.strip()
-
-    # 6. 处理实例模块名（扁平化并去重）
-    flat_instance_names = [item for sublist in instance_module_names for item in (sublist if isinstance(sublist, tuple) else [sublist])]
-    set_instance_names = set(flat_instance_names)
-    
-    # 7. 按照原始顺序筛选未定义信号
-    undefined_signals = []
-    exclude_set = VERILOG_KEYWORDS | defined_signals | module_names | set_instance_names | module_instance_signals | set(parameter_values.keys())
-    
-    # 更新排除集合，添加数字
-    number_pattern = re.compile(r'^\d+$')
-    exclude_numbers = {signal for signal in signals_ordered if number_pattern.match(signal)}
-    exclude_set.update(exclude_numbers)
-    
-    for signal in signals_ordered:
-        if signal not in exclude_set:
-            undefined_signals.append(signal)
-    
-    # 8. 提取位宽信息（如果需要）
-    signal_widths = {}
-    if extract_width:
-        for signal in undefined_signals:
-            signal_widths[signal] = extract_bitwidth(content, signal)
-    
-    return undefined_signals, signal_widths
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            return config
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"警告：无法读取配置文件 {config_file}：{str(e)}")
+        return {}
 
 def generate_signal_definitions(undefined_signals: List[str], signal_widths: Dict[str, Optional[str]], default_width: Optional[str] = None) -> List[str]:
     """
@@ -201,7 +66,25 @@ def generate_signal_definitions(undefined_signals: List[str], signal_widths: Dic
     for signal in undefined_signals:
         width = signal_widths.get(signal) if signal_widths else None
         if width is None and default_width:
-            width = default_width
+            # 处理默认位宽，支持[位宽-1:0]格式
+            # 如果default_width是数字，则转换为[数字-1:0]格式
+            if default_width.isdigit():
+                width = f"[{int(default_width)-1}:0]"
+            # 如果已经是[x:y]格式，则直接使用
+            elif re.match(r'\[\s*\d+\s*:\s*\d+\s*\]', default_width):
+                width = default_width
+            # 如果是其他格式，尝试提取数字并转换为[数字-1:0]格式
+            else:
+                match = re.search(r'(\d+)', default_width)
+                if match:
+                    width = f"[{int(match.group(1))-1}:0]"
+                else:
+                    # 如果无法解析，使用原始值
+                    width = default_width
+        
+        # 确保位宽格式正确
+        if width and not width.startswith('['):
+            width = f"[{width}]"
             
         if width:
             definitions.append(f"wire {width} {signal};\n")
@@ -284,22 +167,50 @@ Verilog自动线网声明工具 (Auto Wire Generator)
   2. 自动推断信号位宽
   3. 支持parameter定义的信号
   4. 多种输出模式（独立文件或追加到原文件）
+  5. 支持用户自定义排除匹配模式（通过命令行或配置文件）
+  6. 增强的模块实例化名称识别（支持常用前缀如u_、i_等）
+  7. 支持generate/endgenerate关键字
+  8. 支持Verilog数值常量（如1'h0, 8'b00101010等）
+  9. 支持多行注释和宏定义
   
 用法示例：
   # 基本用法：生成单独的wire声明文件
-  python auto_wire.py my_design.v
+  autowire my_design.v
   
   # 自动检测位宽
-  python auto_wire.py --width my_design.v
+  autowire --width my_design.v
   
-  # 应用默认位宽
-  python auto_wire.py --default-width "[31:0]" my_design.v
+  # 应用默认位宽（支持多种格式）
+  autowire --default-width "[31:0]" my_design.v  # 直接使用指定位宽
+  autowire --default-width "32" my_design.v     # 自动转换为[31:0]格式
   
   # 直接追加到原始文件
-  python auto_wire.py --append my_design.v
+  autowire --append my_design.v
   
   # 指定输出目录
-  python auto_wire.py --output-dir ./generated my_design.v
+  autowire --output-dir ./generated my_design.v
+  
+  # 排除特定模式的信号（命令行方式）
+  autowire --exclude "temp_.*" "debug_.*" my_design.v
+  
+  # 使用配置文件排除特定模式的信号
+  autowire --config ./config/auto_wire_config.json my_design.v
+  
+配置文件说明：
+  配置文件为JSON格式，包含以下字段：
+  {
+    "exclude_patterns": [
+        "temp_.*",
+        "debug_.*",
+        "test_.*",
+        ".*_reg",
+        ".*_next"
+    ],
+    "description": "用户自定义的匹配模式，支持正则表达式",
+    "version": "1.0.0"
+  }
+  
+  默认配置文件路径：./config/auto_wire_config.json
     """
     print(help_text)
 
@@ -308,45 +219,94 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Verilog自动线网声明工具')
     parser.add_argument('file', help='Verilog源文件路径')
     parser.add_argument('--width', '-w', action='store_true', help='尝试提取信号位宽')
-    parser.add_argument('--default-width', '-d', type=str, help='默认位宽，如 "[7:0]"')
+    parser.add_argument('--default-width', '-d', type=str, help='默认位宽，如 "[7:0]" 或 "8" (会转换为[7:0]格式)')
     parser.add_argument('--append', '-a', action='store_true', help='将定义追加到原始文件')
     parser.add_argument('--output-dir', '-o', type=str, help='输出目录路径')
+    parser.add_argument('--exclude', '-e', type=str, nargs='+', help='排除匹配模式列表，支持正则表达式')
+    parser.add_argument('--config', '-c', type=str, help='配置文件路径')
     parser.add_argument('--verbose', '-v', action='store_true', help='显示详细信息')
     parser.add_argument('--help-detail', action='store_true', help='显示详细使用说明')
-
+    parser.add_argument('--debug', action='store_true', help='启用调试模式，显示详细处理过程')
+    
     args = parser.parse_args()
     
     if args.help_detail:
         print_help()
         return
-
-    file_name = args.file
-    extract_width = args.width
-    default_width = args.default_width
     
-    # 解析Verilog文件
-    undefined_signals, signal_widths = parse_verilog(file_name, extract_width)
-
-    if undefined_signals:
-        if args.verbose:
-            print(f"发现未定义信号：{', '.join(undefined_signals)}")
-            if extract_width:
-                for signal in undefined_signals:
-                    width = signal_widths.get(signal)
-                    print(f"  {signal}: {'无位宽信息' if width is None else width}")
-        else:
-            print(f"发现未定义信号：{len(undefined_signals)}个")
+    # 加载配置文件
+    config = load_config(args.config)
+    exclude_patterns = args.exclude or config.get('exclude_patterns', [])
+    default_width = args.default_width or config.get('default_width')
+    
+    if args.debug:
+        print(f"处理文件: {args.file}")
+        if exclude_patterns:
+            print(f"排除模式: {exclude_patterns}")
+        if default_width:
+            print(f"默认位宽: {default_width}")
+    
+    try:
+        # 解析Verilog文件
+        parser = VerilogParser()
+        parser.parse_file(args.file)
         
-        # 生成定义
-        definitions = generate_signal_definitions(undefined_signals, signal_widths, default_width)
+        if args.debug:
+            print("\n预处理后的内容:")
+            print("="*50)
+            print(parser.processed_content[:300] + "..." if len(parser.processed_content) > 300 else parser.processed_content)
+            print("="*50)
+            print(f"\n检测到已定义信号: {len(parser.defined_signals)}个")
+            print(f"检测到模块名: {parser.module_name}")
+            
+        # 获取未定义信号
+        undefined_signals = parser.get_undefined_signals(exclude_patterns)
         
-        # 输出定义
-        if args.append:
-            append_to_original(file_name, definitions)
+        if undefined_signals:
+            if args.verbose or args.debug:
+                print(f"\n发现未定义信号: {len(undefined_signals)}个")
+                if args.debug:
+                    print(f"信号列表: {', '.join(undefined_signals[:20])}{'...' if len(undefined_signals) > 20 else ''}")
+            
+            # 如果需要提取位宽
+            signal_widths = {}
+            if args.width:
+                signal_widths = parser.get_signal_widths(undefined_signals)
+                
+                if args.debug:
+                    print("\n信号位宽信息:")
+                    for signal, width in signal_widths.items():
+                        if width:
+                            print(f"  {signal}: {width}")
+            
+            # 生成wire声明
+            definitions = generate_signal_definitions(undefined_signals, signal_widths, default_width)
+            
+            if args.debug:
+                print("\n生成的wire声明:")
+                for i, definition in enumerate(definitions[:10]):
+                    print(f"  {definition.strip()}")
+                if len(definitions) > 10:
+                    print("  ...")
+            
+            # 输出或追加声明
+            if args.append:
+                append_to_original(args.file, definitions)
+            else:
+                output_file = write_output(args.file, definitions, args.output_dir)
+                if args.verbose or args.debug:
+                    print(f"\n处理完成。输出文件: {output_file}")
         else:
-            write_output(file_name, definitions, args.output_dir)
-    else:
-        print("未发现未定义信号。")
+            print("\n未发现未定义信号。")
+            
+    except ParseError as e:
+        print(f"\n错误: {str(e)}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n未知错误: {str(e)}")
+        if args.debug:
+            traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    main() 

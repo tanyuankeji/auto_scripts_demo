@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: autowire
+Version: 2.0.0
+Summary: Verilog 自动线网声明工具
+Home-page: https://github.com/icproject/autowire
+Author: ICProject Team
+Author-email: icproject@example.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+License-File: LICENSE

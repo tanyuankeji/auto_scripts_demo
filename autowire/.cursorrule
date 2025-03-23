@@ -43,6 +43,7 @@ Always respond in 中文简体
    - 基础组件层（core）
 3. 配置管理：通过.env文件加载环境变量，使用pydantic-settings进行验证
 4. 依赖管理：requirements.txt需区分dev/prod依赖，使用pip-tools管理精确版本
+5. 将版本更改记录和脚本运行指令记录在README.md文件中
 """
 
 ### 目录结构规范

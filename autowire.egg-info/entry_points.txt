@@ -1,0 +1,2 @@
+[console_scripts]
+autowire = autowire.cli.main:main
