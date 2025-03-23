@@ -1,14 +1,13 @@
 # Build and Release Folders
 ./build
-./tests
 ./autowire.egg-info
+./tests
 
 # Other files and folders
-./*/.cursorrules
-# ./autoregfile/.cursorrules
-# ./autosgdc/.cursorrules
-# ./autotest/.cursorrules
-# ./autowire/.cursorrules
+./autoregfile/.cursorrules
+./autosgdc/.cursorrules
+./autotest/.cursorrules
+./autowire/.cursorrules
 ./cursorrules
 
 
