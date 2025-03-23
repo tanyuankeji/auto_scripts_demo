@@ -4,8 +4,8 @@
 ./tests
 
 # Other files and folders
-./autoregfile/.cursorrules
-./autosgdc/.cursorrules
-./autotest/.cursorrules
-./autowire/.cursorrules
-./cursorrules
+./autoregfile/.cursorrule
+./autosgdc/.cursorrule
+./autotest/.cursorrule
+./autowire/.cursorrule
+./cursorrule
