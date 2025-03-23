@@ -1,11 +1,7 @@
-# Build and Release Folders
-./build
-./autowire.egg-info
-./tests
+# cursorrule
+# 如果要忽略所有cursorrule文件（不管在哪个目录）
+**/.cursorrule
 
-# Other files and folders
-./autoregfile/.cursorrule
-./autosgdc/.cursorrule
-./autotest/.cursorrule
-./autowire/.cursorrule
-./.cursorrule
+# test
+build/
+autowire.egg-info/
