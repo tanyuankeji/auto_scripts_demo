@@ -1,0 +1,10 @@
+{# 寄存器地址常量定义模板 #}
+{% if registers %}
+// 寄存器地址常量定义
+{% for reg in registers %}
+localparam ADDR_{{ reg.name|upper }} = {{ addr_width }}'h{{ '%X' % reg.address|int(0) }};   // {{ reg.description }}{% if reg.type %} ({{ reg.type }}类型){% endif %}
+
+{% endfor %}
+{% else %}
+// 未定义特定寄存器
+{% endif %} 

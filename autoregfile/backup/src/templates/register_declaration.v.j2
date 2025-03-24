@@ -1,0 +1,13 @@
+{# 寄存器声明模板 #}
+{% if registers %}
+// 寄存器声明
+{% for reg in registers %}
+reg [{{ reg.width|default(data_width)-1 }}:0] {{ reg.name|lower }}_reg;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.description }}
+{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
+reg        {{ reg.name|lower }}_written;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.name|lower }} 写标志
+{% endif %}
+{% endfor %}
+{% else %}
+// 未定义特定寄存器
+reg [{{ data_width-1 }}:0] reg_array [0:{{ 2**addr_width-1 }}];
+{% endif %} 

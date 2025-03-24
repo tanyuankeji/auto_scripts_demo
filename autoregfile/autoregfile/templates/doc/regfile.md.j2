@@ -1,0 +1,157 @@
+{# Markdown文档模板 #}
+# {{ module_name }} 寄存器说明文档
+
+*自动生成于: {{ timestamp }}*  
+*生成器版本: {{ generator_version }}*
+
+## 1. 概述
+
+本文档描述 `{{ module_name }}` 模块的寄存器配置和操作方法。
+
+- 数据位宽: {{ data_width }} 位
+- 地址位宽: {{ addr_width }} 位
+- 写端口数量: {{ num_write_ports }}
+- 读端口数量: {{ num_read_ports }}
+
+## 2. 寄存器列表
+
+| 寄存器名称 | 地址 | 类型 | 描述 |
+|------------|------|------|------|
+{% for reg in registers %}
+| {{ reg.name }} | {{ '0x%X' % reg.address|int(0) }} | {{ reg.type }} | {{ reg.description }} |
+{% endfor %}
+
+## 3. 寄存器详细说明
+
+{% for reg in registers %}
+### 3.{{ loop.index }} {{ reg.name }} ({{ '0x%X' % reg.address|int(0) }})
+
+**描述**: {{ reg.description }}
+
+**类型**: {{ reg.type }} {% if reg.type_info is defined %}({{ reg.type_info.description }}){% endif %}
+
+**复位值**: {{ '0x%X' % reg.reset_value|int(0) if reg.reset_value is defined else '0x0' }}
+
+**位域描述**:
+
+{% if register_fields and reg.name in register_fields %}
+
+| 位域 | 位 | 访问类型 | 复位值 | 描述 |
+|------|---|----------|--------|------|
+{% for field in register_fields[reg.name] %}
+| {{ field.name }} | {{ field.bit_range }} | {{ field.type|default(reg.type) }} | {{ '0x%X' % field.reset_value|int(0) if field.reset_value is defined else '0x0' }} | {{ field.description }} |
+{% endfor %}
+
+{% if reg.type in ['ReadOnly', 'Null', 'WriteOnly'] %}
+**注意**: 该寄存器为 {{ reg.type }} 类型，{% if reg.type == 'ReadOnly' %}只能读取，写入会被忽略{% elif reg.type == 'Null' %}不可读写{% else %}只能写入，读取将返回0{% endif %}。
+{% endif %}
+
+{% if reg.type in ['ReadClean', 'WriteReadClean'] %}
+**注意**: 该寄存器会在读取后自动清零。
+{% endif %}
+
+{% if reg.type in ['ReadSet', 'WriteReadSet'] %}
+**注意**: 该寄存器会在读取后自动置位。
+{% endif %}
+
+{% if reg.type in ['Write1Clean', 'Write0Clean'] %}
+**注意**: 写入{% if reg.type == 'Write1Clean' %}1{% else %}0{% endif %}可清零对应位。
+{% endif %}
+
+{% if reg.type in ['Write1Set', 'Write0Set'] %}
+**注意**: 写入{% if reg.type == 'Write1Set' %}1{% else %}0{% endif %}可置位对应位。
+{% endif %}
+
+{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
+**注意**: 该寄存器只能写入一次，之后写入会被忽略。
+{% endif %}
+
+{% elif register_fields is defined %}
+*没有定义位域*
+{% endif %}
+
+{% endfor %}
+
+## 4. 编程指南
+
+### 4.1 基本读写操作
+
+```c
+// 写寄存器示例
+void write_reg(uint32_t addr, uint32_t data) {
+    // 根据实际总线接口实现写操作
+    // ...
+}
+
+// 读寄存器示例
+uint32_t read_reg(uint32_t addr) {
+    // 根据实际总线接口实现读操作
+    // ...
+    return data;
+}
+
+// 使用示例
+void example() {
+{% if registers %}
+{% for reg in registers %}
+{% if reg.type != 'ReadOnly' and reg.type != 'Null' %}
+    // 写入 {{ reg.name }}
+    write_reg({{ module_name|upper }}_{{ reg.name|upper }}_ADDR, 0x12345678);
+{% endif %}
+{% if reg.type != 'WriteOnly' and reg.type != 'Null' %}
+    // 读取 {{ reg.name }}
+    uint32_t {{ reg.name|lower }}_value = read_reg({{ module_name|upper }}_{{ reg.name|upper }}_ADDR);
+{% endif %}
+{% endfor %}
+{% endif %}
+}
+```
+
+### 4.2 位域操作
+
+{% if fields is defined and fields|length > 0 %}
+```c
+void field_operations() {
+{% for field in fields %}
+{% if ':' in field.bit_range %}
+    // 设置 {{ field.register }} 的 {{ field.name }} 字段
+    uint32_t reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
+    reg_value = {{ module_name|upper }}_SET_{{ field.register }}_{{ field.name }}(reg_value, 0x{{ '%X' % (2**(field.width|int) - 1) }});
+    write_reg({{ module_name|upper }}_{{ field.register }}_ADDR, reg_value);
+    
+    // 读取 {{ field.register }} 的 {{ field.name }} 字段
+    reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
+    uint32_t field_value = {{ module_name|upper }}_GET_{{ field.register }}_{{ field.name }}(reg_value);
+{% else %}
+    // 设置 {{ field.register }} 的 {{ field.name }} 位
+    uint32_t reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
+    reg_value = {{ module_name|upper }}_SET_{{ field.register }}_{{ field.name }}(reg_value, 1);
+    write_reg({{ module_name|upper }}_{{ field.register }}_ADDR, reg_value);
+    
+    // 读取 {{ field.register }} 的 {{ field.name }} 位
+    reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
+    uint8_t bit_value = {{ module_name|upper }}_GET_{{ field.register }}_{{ field.name }}(reg_value);
+{% endif %}
+{% endfor %}
+}
+```
+{% else %}
+*没有定义位域操作*
+{% endif %}
+
+## 5. 时序要求
+
+{% if sync_reset %}
+- 该模块使用**同步复位**
+{% else %}
+- 该模块使用**异步复位**
+{% endif %}
+- 所有寄存器操作都是在时钟上升沿完成
+- 读操作无需等待，组合逻辑直接输出
+- 写操作在下一个时钟上升沿生效
+
+## 6. 修订历史
+
+| 版本 | 日期 | 修改内容 |
+|------|------|----------|
+| 1.0 | {{ timestamp.split(' ')[0] }} | 初始版本 | 

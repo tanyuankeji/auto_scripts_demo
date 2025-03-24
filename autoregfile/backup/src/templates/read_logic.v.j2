@@ -1,0 +1,38 @@
+{# 读逻辑模板 #}
+{% for i in range(num_read_ports) %}
+// 读端口{{ i }} 组合逻辑
+always @(*) begin
+    // 默认值为全0
+    rd_data_{{ i }} = {{ data_width }}'d0;
+    
+{% if registers %}
+    {% if registers|length <= 8 %}
+    {# 对于寄存器数量较少的情况，使用if-else结构 #}
+    {% for reg in registers %}
+    {% if reg.type in ['Null', 'WriteOnly', 'WriteOnlyClean', 'WriteOnlySet', 'WriteOnlyOnce'] %}
+    // {{ reg.name }} 是{{ reg.type }}类型寄存器，读取时返回0
+    if (rd_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
+        rd_data_{{ i }} = {{ reg.width|default(data_width) }}'d0;
+    end
+    {% else %}
+    // {{ reg.name }} 是{{ reg.type }}类型寄存器
+    if (rd_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
+        rd_data_{{ i }} = {{ reg.name|lower }}_reg;
+    end
+    {% endif %}
+    {% endfor %}
+    {% else %}
+    {# 对于寄存器数量较多的情况，使用case结构 #}
+    case (rd_addr_{{ i }})
+    {% for reg in registers %}
+        ADDR_{{ reg.name|upper }}: rd_data_{{ i }} = {% if reg.type in ['Null', 'WriteOnly', 'WriteOnlyClean', 'WriteOnlySet', 'WriteOnlyOnce'] %}{{ reg.width|default(data_width) }}'d0{% else %}{{ reg.name|lower }}_reg{% endif %};  // {{ reg.type }} 类型
+    {% endfor %}
+        default: rd_data_{{ i }} = {{ data_width }}'d0;  // 未知地址返回0
+    endcase
+    {% endif %}
+{% else %}
+    rd_data_{{ i }} = reg_array[rd_addr_{{ i }}];
+{% endif %}
+end
+
+{% endfor %} 

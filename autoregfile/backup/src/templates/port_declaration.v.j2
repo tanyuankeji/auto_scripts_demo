@@ -1,0 +1,26 @@
+{# 端口声明模板 #}
+    input wire                      clk,
+    input wire                      rst_n,
+    
+{% for i in range(num_write_ports) %}
+    // 写端口 {{ i }}
+    input wire                      wr_en_{{ i }},
+    input wire [{{ addr_width-1 }}:0]  wr_addr_{{ i }},
+    input wire [{{ data_width-1 }}:0]  wr_data_{{ i }},
+{% if byte_enable %}
+    input wire [{{ (data_width//8)-1 }}:0]  wr_be_{{ i }},
+{% endif %}
+{% endfor %}
+    
+{% for i in range(num_read_ports) %}
+{% if i == 0 and num_write_ports > 0 %}
+    // 读端口 {{ i }}
+{% endif %}
+{% if i < num_read_ports - 1 %}
+    input wire [{{ addr_width-1 }}:0]  rd_addr_{{ i }},
+    output reg [{{ data_width-1 }}:0]  rd_data_{{ i }},
+{% else %}
+    input wire [{{ addr_width-1 }}:0]  rd_addr_{{ i }},
+    output reg [{{ data_width-1 }}:0]  rd_data_{{ i }}
+{% endif %}
+{% endfor %} 

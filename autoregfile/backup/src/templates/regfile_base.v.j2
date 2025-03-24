@@ -1,0 +1,20 @@
+{# 寄存器文件基础模板 #}
+// 自动生成的寄存器文件
+// 生成时间: {{ timestamp }}
+// 生成器版本: 2.0.0
+
+module {{ module_name }} (
+{% include 'port_declaration.v.j2' %}
+);
+
+{% include 'register_constants.v.j2' %}
+
+{% include 'register_declaration.v.j2' %}
+
+{% include 'reset_logic.v.j2' %}
+
+{% include 'write_logic.v.j2' %}
+
+{% include 'read_logic.v.j2' %}
+
+endmodule 
