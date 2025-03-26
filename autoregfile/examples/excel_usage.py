@@ -13,6 +13,7 @@ from pathlib import Path
 
 from autoregfile.parsers import ExcelParser
 from autoregfile.generators import VerilogGenerator, HeaderGenerator, DocGenerator
+from autoregfile.regfile_gen import generate_regfile
 
 
 def create_example_excel(excel_file_path):
@@ -20,11 +21,11 @@ def create_example_excel(excel_file_path):
     # 全局配置
     config_data = {
         'parameter': [
-            'module_name', 'data_width', 'addr_width', 'num_write_ports',
-            'num_read_ports', 'sync_reset', 'reset_value', 'byte_enable'
+            'module_name', 'data_width', 'addr_width', 'bus_protocol',
+            'num_write_ports', 'num_read_ports', 'sync_reset', 'reset_value', 'byte_enable'
         ],
         'value': [
-            'excel_regfile', 32, 8, 1, 2, False, '0x00000000', True
+            'excel_regfile', 32, 8, 'apb', 1, 2, False, '0x00000000', True
         ]
     }
     config_df = pd.DataFrame(config_data)
@@ -33,7 +34,7 @@ def create_example_excel(excel_file_path):
     registers_data = {
         'name': ['CTRL_REG', 'STATUS_REG', 'INT_FLAGS', 'INT_ENABLE'],
         'address': ['0x00', '0x04', '0x08', '0x0C'],
-        'type': ['ReadWrite', 'ReadOnly', 'ReadClean', 'ReadWrite'],
+        'type': ['ReadWrite', 'ReadOnly', 'Write1Clear', 'ReadWrite'],
         'reset_value': ['0x00000000', '0x00000000', '0x00000000', '0x00000000'],
         'description': ['控制寄存器', '状态寄存器', '中断标志寄存器', '中断使能寄存器']
     }
@@ -102,6 +103,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     verilog_file = output_dir / "excel_regfile.v"
+    apb_file = output_dir / "excel_regfile_apb.v"
     header_file = output_dir / "excel_regfile.h"
     doc_file = output_dir / "excel_regfile.md"
     json_file = output_dir / "excel_regfile.json"
@@ -141,8 +143,51 @@ def main():
         print(f"  生成Verilog文件失败: {e}")
         return 1
     
-    # 4. 生成C语言头文件
-    print("\n4. 生成C语言头文件")
+    # 4. 生成APB总线接口寄存器文件
+    print("\n4. 生成APB总线接口寄存器文件")
+    try:
+        # 设置bus_protocol为apb
+        config['bus_protocol'] = 'apb'
+        
+        # 使用JSON临时文件
+        temp_json = output_dir / "temp_apb_config.json"
+        with open(temp_json, 'w') as f:
+            json.dump(config, f, indent=2)
+            
+        # 使用regfile_gen生成APB总线接口
+        generate_regfile(str(temp_json), str(apb_file), False, 'apb')
+        print(f"  已生成APB总线接口文件: {apb_file}")
+        
+        # 显示生成的文件大小和行数
+        file_size = os.path.getsize(apb_file)
+        try:
+            # 尝试使用UTF-8编码读取
+            with open(apb_file, 'r', encoding='utf-8', errors='ignore') as f:
+                line_count = sum(1 for _ in f)
+            print(f"  文件大小: {file_size} 字节, {line_count} 行")
+        except Exception as e:
+            print(f"  文件大小: {file_size} 字节, 读取行数时出错")
+        
+        # 输出前10行内容预览
+        try:
+            with open(apb_file, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()[:10]
+                print("\n  APB文件内容预览 (前10行):")
+                for line in lines:
+                    print(f"    {line.rstrip()}")
+                print("    ...")
+        except Exception as e:
+            print(f"  无法读取文件内容预览: {e}")
+        
+        # 清理临时文件
+        os.remove(temp_json)
+    except Exception as e:
+        print(f"  生成APB总线接口文件失败: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # 5. 生成C语言头文件
+    print("\n5. 生成C语言头文件")
     header_gen = HeaderGenerator()
     try:
         header_code = header_gen.generate(config)
@@ -158,8 +203,8 @@ def main():
         print(f"  生成C语言头文件失败: {e}")
         return 1
     
-    # 5. 生成Markdown文档
-    print("\n5. 生成Markdown文档")
+    # 6. 生成Markdown文档
+    print("\n6. 生成Markdown文档")
     doc_gen = DocGenerator()
     try:
         doc_content = doc_gen.generate(config)
@@ -175,8 +220,8 @@ def main():
         print(f"  生成Markdown文档失败: {e}")
         return 1
     
-    # 6. Excel与JSON相互转换示例
-    print("\n6. Excel与JSON相互转换示例")
+    # 7. Excel与JSON相互转换示例
+    print("\n7. Excel与JSON相互转换示例")
     try:
         # 将JSON配置转换回Excel
         reverse_excel_file = output_dir / "reverse_config.xlsx"

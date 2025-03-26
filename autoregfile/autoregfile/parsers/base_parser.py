@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Optional, Type
 import os
 import importlib
 
+from ..core.address_planner import get_address_planner
+
 
 class ConfigParser:
     """配置解析器基类"""
@@ -55,23 +57,30 @@ class ConfigParser:
             "byte_enable": True,
             "default_reg_type": "ReadWrite",
             "implementation": "instance",
+            "auto_address": False,  # 是否自动分配地址
         }
         
         for key, value in defaults.items():
             if key not in config:
                 config[key] = value
         
+        # 获取地址规划器
+        address_planner = get_address_planner()
+        
         # 验证寄存器列表
         if "registers" not in config or not config["registers"]:
             config["registers"] = []
         
+        # 创建寄存器名称到索引的映射，用于后续锁定关系处理
+        reg_name_to_index = {}
         for i, reg in enumerate(config["registers"]):
             # 检查必需字段
             if "name" not in reg:
                 raise ValueError(f"寄存器 #{i+1} 缺少名称")
             
-            if "address" not in reg:
-                raise ValueError(f"寄存器 '{reg['name']}' 缺少地址")
+            # 注意：如果自动分配地址，这里不检查地址字段
+            if not config["auto_address"] and "address" not in reg:
+                raise ValueError(f"寄存器 '{reg['name']}' 缺少地址，且未启用自动地址分配")
             
             # 设置默认值
             if "width" not in reg:
@@ -85,6 +94,50 @@ class ConfigParser:
                 
             if "description" not in reg:
                 reg["description"] = f"寄存器 {reg['name']}"
+            
+            # 添加锁定关系字段
+            if "locked_by" not in reg:
+                reg["locked_by"] = []
+                
+            # 记录寄存器名称到索引的映射
+            reg_name_to_index[reg["name"]] = i
+        
+        # 处理字段定义
+        if "fields" not in config or not config["fields"]:
+            config["fields"] = []
+        
+        # 处理锁定关系
+        if "lock_relations" in config and config["lock_relations"]:
+            for lock_rel in config["lock_relations"]:
+                if "locker" not in lock_rel or "locked" not in lock_rel:
+                    continue
+                    
+                locker_name = lock_rel["locker"]
+                locked_name = lock_rel["locked"]
+                
+                # 验证锁定关系中的寄存器是否存在
+                if locker_name not in reg_name_to_index:
+                    raise ValueError(f"锁定关系中的锁定寄存器 '{locker_name}' 不存在")
+                    
+                if locked_name not in reg_name_to_index:
+                    raise ValueError(f"锁定关系中的被锁定寄存器 '{locked_name}' 不存在")
+                
+                # 添加锁定关系
+                locked_idx = reg_name_to_index[locked_name]
+                config["registers"][locked_idx]["locked_by"].append(locker_name)
+        
+        # 自动分配地址（如果启用）
+        if config["auto_address"]:
+            config = address_planner.auto_assign_addresses(config, config["module_name"])
+        
+        # 验证地址规划
+        errors = address_planner.validate_addresses(config)
+        if errors:
+            for error in errors:
+                print(f"警告: {error}")
+        
+        # 添加内存映射
+        config["memory_map"] = address_planner.get_memory_map_markdown()
         
         return config
 

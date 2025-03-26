@@ -66,6 +66,11 @@ class VerilogGenerator(BaseGenerator):
         """
         context = super().prepare_context(config)
         
+        # 检查是否存在脉冲寄存器类型
+        has_pulse_registers = False
+        # 检查是否存在锁定关系的寄存器
+        has_locked_registers = False
+        
         # 处理寄存器类型信息
         if 'registers' in context:
             for reg in context['registers']:
@@ -79,6 +84,15 @@ class VerilogGenerator(BaseGenerator):
                         'writable': reg_type_obj.writable,
                         'special_behaviors': reg_type_obj.special_behaviors
                     }
+                    
+                    # 检查是否为脉冲类型寄存器
+                    if reg_type in ['Write1Pulse', 'Write0Pulse']:
+                        has_pulse_registers = True
+                    
+                    # 检查是否存在锁定关系
+                    if reg.get('locked_by') and len(reg['locked_by']) > 0:
+                        has_locked_registers = True
+                        
                 except ValueError:
                     print(f"警告: 未知的寄存器类型 '{reg_type}'，使用 'ReadWrite' 替代")
                     reg['type'] = 'ReadWrite'
@@ -90,6 +104,11 @@ class VerilogGenerator(BaseGenerator):
                         'writable': reg_type_obj.writable,
                         'special_behaviors': reg_type_obj.special_behaviors
                     }
+        
+        # 设置脉冲寄存器标志
+        context['has_pulse_registers'] = has_pulse_registers
+        # 设置锁定寄存器标志
+        context['has_locked_registers'] = has_locked_registers
         
         # 计算字节使能数量
         if context.get('byte_enable', False):

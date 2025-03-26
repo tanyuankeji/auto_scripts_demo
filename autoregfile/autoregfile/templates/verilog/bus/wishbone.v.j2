@@ -1,0 +1,335 @@
+// ----------------------------------------------------------------------------
+// Wishbone B4总线接口寄存器文件
+// 生成日期: {{ generation_time }}
+// 模块名称: {{ module_name }}
+// ----------------------------------------------------------------------------
+
+`timescale 1ns / 1ps
+
+module {{ module_name }} #(
+    // 参数定义
+    parameter ADDR_WIDTH = {{ addr_width }},              // 地址宽度
+    parameter DATA_WIDTH = {{ data_width }},              // 数据宽度
+    parameter BYTE_ENABLE = 1                             // 字节使能支持
+) (
+    // 系统信号
+    input  wire                      clk,                 // 时钟信号
+    input  wire                      rst_n,               // 异步复位，低电平有效
+    
+    // Wishbone B4总线接口信号
+    input  wire [ADDR_WIDTH-1:0]     wb_adr_i,            // 地址输入
+    input  wire [DATA_WIDTH-1:0]     wb_dat_i,            // 数据输入
+    output wire [DATA_WIDTH-1:0]     wb_dat_o,            // 数据输出
+    input  wire                      wb_we_i,             // 写使能信号
+    input  wire [DATA_WIDTH/8-1:0]   wb_sel_i,            // 字节选通信号
+    input  wire                      wb_stb_i,            // 选通信号
+    input  wire                      wb_cyc_i,            // 总线周期信号
+    output wire                      wb_ack_o,            // 确认信号
+    output wire                      wb_err_o,            // 错误信号
+    
+    {% if register_outputs %}
+    // 寄存器信号
+    {% for output in register_outputs %}
+    {{ output.direction }} {% if output.width > 1 %}[{{ output.width-1 }}:0]{% endif %} {{ output.name }}{% if not loop.last %},{% endif %}
+    {% endfor %}
+    {% endif %}
+);
+
+    // 内部信号定义
+    reg                        wb_ack_reg;                // 确认信号寄存器
+    reg                        wb_err_reg;                // 错误信号寄存器
+    reg  [DATA_WIDTH-1:0]      wb_dat_reg;                // 读数据寄存器
+    wire                       wb_valid;                  // 总线周期有效信号
+    wire                       wb_read;                   // 读操作信号
+    wire                       wb_write;                  // 写操作信号
+    wire [ADDR_WIDTH-3:0]      reg_addr;                  // 寄存器地址(按字对齐)
+    
+    // 脉冲寄存器相关信号
+    {% for reg in registers %}
+    {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+    reg [DATA_WIDTH-1:0]      {{ reg.name|lower }}_pulse_reg;      // {{ reg.description }} 脉冲寄存器
+    {% endif %}
+    {% endfor %}
+    
+    // 内部状态定义
+    localparam IDLE = 2'b00;              // 空闲状态
+    localparam READ = 2'b01;              // 读状态
+    localparam WRITE = 2'b10;             // 写状态
+    localparam RESPONSE = 2'b11;          // 响应状态
+    
+    reg [1:0] wb_state;                   // 总线状态机
+    reg [1:0] wb_next_state;              // 下一个状态
+    
+    // 总线控制信号
+    assign wb_valid = wb_cyc_i && wb_stb_i;
+    assign wb_read = wb_valid && !wb_we_i;
+    assign wb_write = wb_valid && wb_we_i;
+    assign reg_addr = wb_adr_i[ADDR_WIDTH-1:2];  // 字对齐
+    
+    // 输出信号赋值
+    assign wb_ack_o = wb_ack_reg;
+    assign wb_err_o = wb_err_reg;
+    assign wb_dat_o = wb_dat_reg;
+    
+    {% if register_outputs %}
+    // 寄存器信号定义
+    {% for reg in registers %}
+    reg [DATA_WIDTH-1:0]      {{ reg.name|lower }}_reg;     // {{ reg.description }}
+    {% if 'locked_by' in reg %}
+    wire                      {{ reg.name|lower }}_locked;  // {{ reg.name }} 锁定信号
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+    
+    // 输出信号连接
+    {% for reg in registers %}
+    {% for field in reg.fields|default([]) %}
+    {% if field.output %}
+    assign {{ field.output }} = {{ reg.name|lower }}_reg[{{ field.bits }}];
+    {% endif %}
+    {% endfor %}
+    {% endfor %}
+    
+    // 脉冲输出信号连接
+    {% for reg in registers %}
+    {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+    assign {{ reg.name|lower }}_pulse = {{ reg.name|lower }}_pulse_reg;
+    {% endif %}
+    {% endfor %}
+    
+    // 寄存器锁定逻辑
+    {% for reg in registers %}
+    {% if 'locked_by' in reg %}
+    assign {{ reg.name|lower }}_locked = 
+    {% for lock_reg in reg.locked_by %}
+    {% if 'lock_condition' in reg %}
+    {{ lock_reg|lower }}_reg[{{ reg.lock_condition }}]{% if not loop.last %} || {% endif %}
+    {% else %}
+    {{ lock_reg|lower }}_reg[0]{% if not loop.last %} || {% endif %}
+    {% endif %}
+    {% endfor %};
+    {% endif %}
+    {% endfor %}
+    
+    // Wishbone状态机
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            wb_state <= IDLE;
+        end else begin
+            wb_state <= wb_next_state;
+        end
+    end
+    
+    // 下一状态逻辑
+    always @(*) begin
+        wb_next_state = wb_state;
+        
+        case (wb_state)
+            IDLE: begin
+                if (wb_read)
+                    wb_next_state = READ;
+                else if (wb_write)
+                    wb_next_state = WRITE;
+            end
+            
+            READ: begin
+                wb_next_state = RESPONSE;
+            end
+            
+            WRITE: begin
+                wb_next_state = RESPONSE;
+            end
+            
+            RESPONSE: begin
+                if (!wb_valid)
+                    wb_next_state = IDLE;
+            end
+            
+            default: begin
+                wb_next_state = IDLE;
+            end
+        endcase
+    end
+    
+    // 总线状态控制逻辑
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            wb_ack_reg <= 1'b0;
+            wb_err_reg <= 1'b0;
+            wb_dat_reg <= {DATA_WIDTH{1'b0}};
+        end else begin
+            case (wb_state)
+                IDLE: begin
+                    wb_ack_reg <= 1'b0;
+                    wb_err_reg <= 1'b0;
+                end
+                
+                READ: begin
+                    // 读操作 - 根据地址选择寄存器数据
+                    case (reg_addr)
+                        {% for reg in registers %}
+                        'h{{ reg.address|replace('0x', '') }}: begin
+                            wb_dat_reg <= {{ reg.name|lower }}_reg;
+                            wb_ack_reg <= 1'b1;
+                            wb_err_reg <= 1'b0;
+                        end
+                        {% endfor %}
+                        
+                        default: begin
+                            // 读取不存在的寄存器地址
+                            wb_dat_reg <= {DATA_WIDTH{1'b0}};
+                            wb_ack_reg <= 1'b1;
+                            wb_err_reg <= 1'b1;  // 地址错误
+                        end
+                    endcase
+                end
+                
+                WRITE: begin
+                    // 写操作 - 根据地址选择要写入的寄存器
+                    wb_ack_reg <= 1'b1;  // 确认写入
+                    wb_err_reg <= 1'b0;
+                    
+                    // 字节使能逻辑处理
+                    if (BYTE_ENABLE) begin
+                        case (reg_addr)
+                            {% for reg in registers %}
+                            'h{{ reg.address|replace('0x', '') }}: begin
+                                {% if reg.type != 'ReadOnly' %}
+                                {% if 'locked_by' in reg %}
+                                if (!{{ reg.name|lower }}_locked) begin
+                                {% endif %}
+                                    {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+                                    // 脉冲寄存器特殊处理
+                                    {% if reg.type == 'Write1Pulse' %}
+                                    // Write1Pulse类型 - 写1产生脉冲
+                                    {{ reg.name|lower }}_pulse_reg <= wb_dat_i & {{ '{DATA_WIDTH{1\'b1}}' }};
+                                    {% else %}
+                                    // Write0Pulse类型 - 写0产生脉冲
+                                    {{ reg.name|lower }}_pulse_reg <= ~wb_dat_i & {{ '{DATA_WIDTH{1\'b1}}' }};
+                                    {% endif %}
+                                    {% else %}
+                                    // 普通寄存器字节使能写入
+                                    if (wb_sel_i[0]) {{ reg.name|lower }}_reg[7:0] <= wb_dat_i[7:0];
+                                    if (wb_sel_i[1]) {{ reg.name|lower }}_reg[15:8] <= wb_dat_i[15:8];
+                                    if (wb_sel_i[2]) {{ reg.name|lower }}_reg[23:16] <= wb_dat_i[23:16];
+                                    if (wb_sel_i[3]) {{ reg.name|lower }}_reg[31:24] <= wb_dat_i[31:24];
+                                    {% endif %}
+                                {% if 'locked_by' in reg %}
+                                end else begin
+                                    // 寄存器已锁定，忽略写入
+                                    wb_err_reg <= 1'b1;
+                                end
+                                {% endif %}
+                                {% else %}
+                                // 尝试写只读寄存器
+                                wb_err_reg <= 1'b1;
+                                {% endif %}
+                            end
+                            {% endfor %}
+                            
+                            default: begin
+                                // 写入不存在的寄存器地址
+                                wb_err_reg <= 1'b1;  // 地址错误
+                            end
+                        endcase
+                    end else begin
+                        // 不使用字节使能时的完整字写入
+                        case (reg_addr)
+                            {% for reg in registers %}
+                            'h{{ reg.address|replace('0x', '') }}: begin
+                                {% if reg.type != 'ReadOnly' %}
+                                {% if 'locked_by' in reg %}
+                                if (!{{ reg.name|lower }}_locked) begin
+                                {% endif %}
+                                    {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+                                    // 脉冲寄存器特殊处理
+                                    {% if reg.type == 'Write1Pulse' %}
+                                    // Write1Pulse类型 - 写1产生脉冲
+                                    {{ reg.name|lower }}_pulse_reg <= wb_dat_i & {{ '{DATA_WIDTH{1\'b1}}' }};
+                                    {% else %}
+                                    // Write0Pulse类型 - 写0产生脉冲
+                                    {{ reg.name|lower }}_pulse_reg <= ~wb_dat_i & {{ '{DATA_WIDTH{1\'b1}}' }};
+                                    {% endif %}
+                                    {% else %}
+                                    // 普通寄存器完整写入
+                                    {{ reg.name|lower }}_reg <= wb_dat_i;
+                                    {% endif %}
+                                {% if 'locked_by' in reg %}
+                                end else begin
+                                    // 寄存器已锁定，忽略写入
+                                    wb_err_reg <= 1'b1;
+                                end
+                                {% endif %}
+                                {% else %}
+                                // 尝试写只读寄存器
+                                wb_err_reg <= 1'b1;
+                                {% endif %}
+                            end
+                            {% endfor %}
+                            
+                            default: begin
+                                // 写入不存在的寄存器地址
+                                wb_err_reg <= 1'b1;  // 地址错误
+                            end
+                        endcase
+                    end
+                end
+                
+                RESPONSE: begin
+                    // 一个周期后清除确认信号
+                    if (!wb_valid) begin
+                        wb_ack_reg <= 1'b0;
+                        wb_err_reg <= 1'b0;
+                    end
+                end
+                
+                default: begin
+                    wb_ack_reg <= 1'b0;
+                    wb_err_reg <= 1'b0;
+                end
+            endcase
+        end
+    end
+    
+    // 寄存器重置和更新逻辑
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            // 寄存器复位值初始化
+            {% for reg in registers %}
+            {{ reg.name|lower }}_reg <= {{ reg.reset_value }};
+            {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+            {{ reg.name|lower }}_pulse_reg <= {DATA_WIDTH{1'b0}};
+            {% endif %}
+            {% endfor %}
+        end else begin
+            // 清除脉冲寄存器 - 脉冲只持续一个时钟周期
+            {% for reg in registers %}
+            {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+            {{ reg.name|lower }}_pulse_reg <= {DATA_WIDTH{1'b0}};
+            {% endif %}
+            {% endfor %}
+            
+            // 写清除(Write1Clear)类型寄存器处理
+            {% for reg in registers %}
+            {% if reg.type == 'Write1Clear' %}
+            // 如果在WRITE状态且地址匹配，则执行写清除操作
+            if (wb_state == WRITE && reg_addr == 'h{{ reg.address|replace('0x', '') }} && wb_valid && wb_we_i) begin
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~wb_dat_i;
+            end
+            {% endif %}
+            {% endfor %}
+            
+            // 外部信号输入寄存器处理
+            {% for reg in registers %}
+            {% if reg.type == 'ReadOnly' %}
+            {% for field in reg.fields|default([]) %}
+            {% if field.input %}
+            {{ reg.name|lower }}_reg[{{ field.bits }}] <= {{ field.input }};
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% endfor %}
+        end
+    end
+
+endmodule 

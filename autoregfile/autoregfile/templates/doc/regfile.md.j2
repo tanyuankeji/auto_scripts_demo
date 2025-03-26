@@ -13,7 +13,11 @@
 - 写端口数量: {{ num_write_ports }}
 - 读端口数量: {{ num_read_ports }}
 
-## 2. 寄存器列表
+## 2. 内存映射
+
+{{ memory_map }}
+
+## 3. 寄存器列表
 
 | 寄存器名称 | 地址 | 类型 | 描述 |
 |------------|------|------|------|
@@ -21,10 +25,10 @@
 | {{ reg.name }} | {{ '0x%X' % reg.address|int(0) }} | {{ reg.type }} | {{ reg.description }} |
 {% endfor %}
 
-## 3. 寄存器详细说明
+## 4. 寄存器详细说明
 
 {% for reg in registers %}
-### 3.{{ loop.index }} {{ reg.name }} ({{ '0x%X' % reg.address|int(0) }})
+### 4.{{ loop.index }} {{ reg.name }} ({{ '0x%X' % reg.address|int(0) }})
 
 **描述**: {{ reg.description }}
 
@@ -66,15 +70,19 @@
 **注意**: 该寄存器只能写入一次，之后写入会被忽略。
 {% endif %}
 
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+**注意**: 该寄存器为脉冲类型，写入{% if reg.type == 'Write1Pulse' %}1{% else %}0{% endif %}会产生一个时钟周期的脉冲输出。
+{% endif %}
+
 {% elif register_fields is defined %}
 *没有定义位域*
 {% endif %}
 
 {% endfor %}
 
-## 4. 编程指南
+## 5. 编程指南
 
-### 4.1 基本读写操作
+### 5.1 基本读写操作
 
 ```c
 // 写寄存器示例
@@ -107,7 +115,7 @@ void example() {
 }
 ```
 
-### 4.2 位域操作
+### 5.2 位域操作
 
 {% if fields is defined and fields|length > 0 %}
 ```c
@@ -139,7 +147,7 @@ void field_operations() {
 *没有定义位域操作*
 {% endif %}
 
-## 5. 时序要求
+## 6. 时序要求
 
 {% if sync_reset %}
 - 该模块使用**同步复位**
@@ -150,7 +158,7 @@ void field_operations() {
 - 读操作无需等待，组合逻辑直接输出
 - 写操作在下一个时钟上升沿生效
 
-## 6. 修订历史
+## 7. 修订历史
 
 | 版本 | 日期 | 修改内容 |
 |------|------|----------|

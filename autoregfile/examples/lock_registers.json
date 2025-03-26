@@ -1,0 +1,100 @@
+{
+  "module_name": "lock_reg_example",
+  "data_width": 32,
+  "addr_width": 8,
+  "num_write_ports": 1,
+  "num_read_ports": 1,
+  "sync_reset": false,
+  "reset_value": "0x00000000",
+  "byte_enable": true,
+  "registers": [
+    {
+      "name": "LOCK_REG",
+      "address": "0x00",
+      "type": "LockField",
+      "reset_value": "0x00000000",
+      "description": "锁定控制寄存器"
+    },
+    {
+      "name": "CTRL_REG",
+      "address": "0x04",
+      "type": "ReadWrite",
+      "reset_value": "0x00000000",
+      "description": "控制寄存器"
+    },
+    {
+      "name": "CONFIG_REG",
+      "address": "0x08",
+      "type": "ReadWrite",
+      "reset_value": "0x00000000",
+      "description": "配置寄存器"
+    },
+    {
+      "name": "STATUS_REG",
+      "address": "0x0C",
+      "type": "ReadOnly",
+      "reset_value": "0x00000000",
+      "description": "状态寄存器"
+    }
+  ],
+  "fields": [
+    {
+      "register": "LOCK_REG",
+      "name": "CTRL_LOCK",
+      "bit_range": "0",
+      "description": "控制寄存器锁定位"
+    },
+    {
+      "register": "LOCK_REG",
+      "name": "CONFIG_LOCK",
+      "bit_range": "1",
+      "description": "配置寄存器锁定位"
+    },
+    {
+      "register": "CTRL_REG",
+      "name": "ENABLE",
+      "bit_range": "0",
+      "description": "使能位"
+    },
+    {
+      "register": "CTRL_REG",
+      "name": "MODE",
+      "bit_range": "2:1",
+      "description": "模式设置"
+    },
+    {
+      "register": "CONFIG_REG",
+      "name": "CLK_DIV",
+      "bit_range": "7:0",
+      "description": "时钟分频系数"
+    },
+    {
+      "register": "CONFIG_REG",
+      "name": "TIMEOUT",
+      "bit_range": "15:8",
+      "description": "超时计数"
+    },
+    {
+      "register": "STATUS_REG",
+      "name": "BUSY",
+      "bit_range": "0",
+      "description": "忙标志"
+    },
+    {
+      "register": "STATUS_REG",
+      "name": "ERROR",
+      "bit_range": "1",
+      "description": "错误标志"
+    }
+  ],
+  "lock_relations": [
+    {
+      "locker": "LOCK_REG",
+      "locked": "CTRL_REG"
+    },
+    {
+      "locker": "LOCK_REG",
+      "locked": "CONFIG_REG"
+    }
+  ]
+} 

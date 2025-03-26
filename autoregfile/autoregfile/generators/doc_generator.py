@@ -91,6 +91,24 @@ class DocGenerator(BaseGenerator):
         
         context['register_fields'] = register_fields
         
+        # 添加内存映射
+        if 'memory_map' in config:
+            context['memory_map'] = config['memory_map']
+        else:
+            # 如果没有内存映射，生成一个简单的表格
+            memory_map = "# 寄存器内存映射\n\n"
+            memory_map += "| 地址 | 寄存器名 | 描述 | 类型 |\n"
+            memory_map += "|------|----------|------|------|\n"
+            
+            if 'registers' in context:
+                for reg in sorted(context['registers'], key=lambda r: int(r['address'], 16) if isinstance(r['address'], str) else r['address']):
+                    addr = reg['address']
+                    if isinstance(addr, str) and not addr.startswith('0x'):
+                        addr = f"0x{int(addr):X}"
+                    memory_map += f"| {addr} | {reg['name']} | {reg.get('description', '')} | {reg.get('type', 'ReadWrite')} |\n"
+            
+            context['memory_map'] = memory_map
+        
         return context
 
 

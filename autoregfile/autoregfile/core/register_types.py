@@ -232,6 +232,87 @@ class RegisterTypeManager:
         end
                 """
         
+        # Write1Pulse类型 - 写1产生一个周期的脉冲，然后自动清零
+        class Write1PulseRegister(RegisterType):
+            def __init__(self):
+                super().__init__("Write1Pulse", "写1产生一个周期的脉冲，然后自动清零",
+                              True, True, special_behaviors=["write_1_pulse"])
+            
+            def get_write_behavior(self, reg_name: str, data_width: int, 
+                                 addr: str, data: str, enable: str) -> str:
+                return f"""
+        // 写1脉冲寄存器
+        if ({enable} && {addr} == ADDR_{reg_name.upper()}) begin
+            // 如果数据位为1，生成脉冲
+            {reg_name.lower()}_pulse <= {data} & {{({data_width}){{1'b1}}}};
+            // 实际寄存器始终保持为0
+            {reg_name.lower()}_reg <= {data_width}'d0;
+        end else begin
+            // 脉冲信号只维持一个周期
+            {reg_name.lower()}_pulse <= {data_width}'d0;
+        end
+                """
+            
+            def get_read_behavior(self, reg_name: str, data_width: int, 
+                                addr: str, data: str) -> str:
+                return f"""
+        if ({addr} == ADDR_{reg_name.upper()}) begin
+            {data} = {reg_name.lower()}_reg; // 始终读到0
+        end
+                """
+        
+        # Write0Pulse类型 - 写0产生一个周期的脉冲，然后自动清零
+        class Write0PulseRegister(RegisterType):
+            def __init__(self):
+                super().__init__("Write0Pulse", "写0产生一个周期的脉冲，然后自动清零",
+                              True, True, special_behaviors=["write_0_pulse"])
+            
+            def get_write_behavior(self, reg_name: str, data_width: int, 
+                                 addr: str, data: str, enable: str) -> str:
+                return f"""
+        // 写0脉冲寄存器
+        if ({enable} && {addr} == ADDR_{reg_name.upper()}) begin
+            // 如果数据位为0，生成脉冲
+            {reg_name.lower()}_pulse <= ~{data} & {{({data_width}){{1'b1}}}};
+            // 实际寄存器始终保持为0
+            {reg_name.lower()}_reg <= {data_width}'d0;
+        end else begin
+            // 脉冲信号只维持一个周期
+            {reg_name.lower()}_pulse <= {data_width}'d0;
+        end
+                """
+            
+            def get_read_behavior(self, reg_name: str, data_width: int, 
+                                addr: str, data: str) -> str:
+                return f"""
+        if ({addr} == ADDR_{reg_name.upper()}) begin
+            {data} = {reg_name.lower()}_reg; // 始终读到0
+        end
+                """
+        
+        # LockField类型 - 锁定其他寄存器的修改
+        class LockFieldRegister(RegisterType):
+            def __init__(self):
+                super().__init__("LockField", "锁定字段，用于控制其他寄存器的写保护",
+                              True, True, special_behaviors=["lock_field"])
+            
+            def get_write_behavior(self, reg_name: str, data_width: int, 
+                                 addr: str, data: str, enable: str) -> str:
+                return f"""
+        // 锁定字段寄存器
+        if ({enable} && {addr} == ADDR_{reg_name.upper()}) begin
+            {reg_name.lower()}_reg <= {data};
+        end
+                """
+            
+            def get_read_behavior(self, reg_name: str, data_width: int, 
+                                addr: str, data: str) -> str:
+                return f"""
+        if ({addr} == ADDR_{reg_name.upper()}) begin
+            {data} = {reg_name.lower()}_reg;
+        end
+                """
+        
         # 注册所有寄存器类型
         self.register_type(ReadWriteRegister())
         self.register_type(ReadOnlyRegister())
@@ -240,6 +321,9 @@ class RegisterTypeManager:
         self.register_type(Write1CleanRegister())
         self.register_type(Write1SetRegister())
         self.register_type(WriteOnceRegister())
+        self.register_type(Write1PulseRegister())
+        self.register_type(Write0PulseRegister())
+        self.register_type(LockFieldRegister())
         
         # 可以继续添加更多类型...
     

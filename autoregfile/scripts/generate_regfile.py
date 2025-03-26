@@ -45,6 +45,8 @@ def parse_args() -> argparse.Namespace:
                       help="自定义模板目录")
     parser.add_argument("-v", "--verbose", action="store_true",
                       help="显示详细输出")
+    parser.add_argument("--auto-address", action="store_true",
+                      help="自动分配寄存器地址")
     
     return parser.parse_args()
 
@@ -57,6 +59,10 @@ def main() -> int:
         # 解析配置
         parser = detect_parser(args.config)
         config = parser.parse(args.config)
+        
+        # 设置自动地址分配标志
+        if args.auto_address:
+            config["auto_address"] = True
         
         # 准备输出路径
         if os.path.isdir(args.output):

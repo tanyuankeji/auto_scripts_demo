@@ -2,6 +2,7 @@
   "module_name": "excel_regfile",
   "data_width": 32,
   "addr_width": 8,
+  "bus_protocol": "apb",
   "num_write_ports": 1,
   "num_read_ports": 2,
   "sync_reset": false,
@@ -14,7 +15,8 @@
       "type": "ReadWrite",
       "reset_value": "0x00000000",
       "description": "\u63a7\u5236\u5bc4\u5b58\u5668",
-      "width": 32
+      "width": 32,
+      "locked_by": []
     },
     {
       "name": "STATUS_REG",
@@ -22,15 +24,17 @@
       "type": "ReadOnly",
       "reset_value": "0x00000000",
       "description": "\u72b6\u6001\u5bc4\u5b58\u5668",
-      "width": 32
+      "width": 32,
+      "locked_by": []
     },
     {
       "name": "INT_FLAGS",
       "address": "0x08",
-      "type": "ReadClean",
+      "type": "Write1Clear",
       "reset_value": "0x00000000",
       "description": "\u4e2d\u65ad\u6807\u5fd7\u5bc4\u5b58\u5668",
-      "width": 32
+      "width": 32,
+      "locked_by": []
     },
     {
       "name": "INT_ENABLE",
@@ -38,7 +42,8 @@
       "type": "ReadWrite",
       "reset_value": "0x00000000",
       "description": "\u4e2d\u65ad\u4f7f\u80fd\u5bc4\u5b58\u5668",
-      "width": 32
+      "width": 32,
+      "locked_by": []
     }
   ],
   "fields": [
@@ -98,5 +103,7 @@
     }
   ],
   "default_reg_type": "ReadWrite",
-  "implementation": "instance"
+  "implementation": "instance",
+  "auto_address": false,
+  "memory_map": "# \u5185\u5b58\u6620\u5c04\n\n"
 }

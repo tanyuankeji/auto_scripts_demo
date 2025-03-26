@@ -26,9 +26,16 @@ module {{ module_name }} (
     output reg [{{ data_width-1 }}:0]  rd_data_{{ i }},
 {% else %}
     input wire [{{ addr_width-1 }}:0]  rd_addr_{{ i }},
-    output reg [{{ data_width-1 }}:0]  rd_data_{{ i }}
+    output reg [{{ data_width-1 }}:0]  rd_data_{{ i }}{% if has_pulse_registers %},{% endif %}
 {% endif %}
 {% endfor %}
+
+{% if has_pulse_registers %}
+    // 脉冲输出信号
+{% for reg in registers %}{% if reg.type == 'Write1Pulse' or reg.type == 'Write0Pulse' %}
+    output reg [{{ data_width-1 }}:0]  {{ reg.name|lower }}_pulse{% if not loop.last %},{% endif %}
+{% endif %}{% endfor %}
+{% endif %}
 );
 
 {% if registers %}
@@ -43,10 +50,25 @@ reg [{{ reg.width|default(data_width)-1 }}:0] {{ reg.name|lower }}_reg;{{ ' ' * 
 {% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
 reg        {{ reg.name|lower }}_written;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.name|lower }} 写标志
 {% endif %}
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+// 脉冲寄存器声明（内部寄存器变量已在输出端口声明）
+{% endif %}
+{% if reg.locked_by %}
+wire       {{ reg.name|lower }}_locked;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.name|lower }} 锁定标志
+{% endif %}
 {% endfor %}
 {% else %}
 // 未定义特定寄存器
 reg [{{ data_width-1 }}:0] reg_array [0:{{ 2**addr_width-1 }}];
+{% endif %}
+
+{% if has_locked_registers %}
+// 锁定逻辑
+{% for reg in registers %}
+{% if reg.locked_by %}
+assign {{ reg.name|lower }}_locked = {% for locker in reg.locked_by %}{{ locker|lower }}_reg[0]{% if not loop.last %} || {% endif %}{% endfor %};
+{% endif %}
+{% endfor %}
 {% endif %}
 
 // 复位和写逻辑
@@ -57,6 +79,9 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
         {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'{{ 'h' if reg.reset_value|string|startswith('0x') else 'd' }}{{ reg.reset_value|string|replace('0x', '') }};
         {% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
         {{ reg.name|lower }}_written <= 1'b0;
+        {% endif %}
+        {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+        {{ reg.name|lower }}_pulse <= {{ reg.width|default(data_width) }}'d0;
         {% endif %}
     {% endfor %}
 {% else %}
@@ -162,9 +187,37 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
             {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg ^ ~wr_data_{{ i }};
             {% endif %}
         end
+        {% elif reg.type == 'Write1Pulse' %}
+        // {{ reg.name }} 是Write1Pulse类型寄存器，写1产生一个周期的脉冲
+        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
+            {% if byte_enable %}
+            {% for byte in range(data_width//8) %}
+            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_pulse[{{ byte*8+7 }}:{{ byte*8 }}] <= wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];
+            {% endfor %}
+            {% else %}
+            {{ reg.name|lower }}_pulse <= wr_data_{{ i }};
+            {% endif %}
+            {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'d0; // 寄存器始终为0
+        end else begin
+            {{ reg.name|lower }}_pulse <= {{ reg.width|default(data_width) }}'d0; // 脉冲只持续一个周期
+        end
+        {% elif reg.type == 'Write0Pulse' %}
+        // {{ reg.name }} 是Write0Pulse类型寄存器，写0产生一个周期的脉冲
+        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
+            {% if byte_enable %}
+            {% for byte in range(data_width//8) %}
+            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_pulse[{{ byte*8+7 }}:{{ byte*8 }}] <= ~wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}] & {8{1'b1}};
+            {% endfor %}
+            {% else %}
+            {{ reg.name|lower }}_pulse <= ~wr_data_{{ i }} & {{ '{%d{1\'b1}}' % reg.width|default(data_width) }};
+            {% endif %}
+            {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'d0; // 寄存器始终为0
+        end else begin
+            {{ reg.name|lower }}_pulse <= {{ reg.width|default(data_width) }}'d0; // 脉冲只持续一个周期
+        end
         {% else %}
         // {{ reg.name }} 是{{ reg.type }}类型寄存器
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
+        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}{% if reg.locked_by %} && !{{ reg.name|lower }}_locked{% endif %}) begin
             {% if byte_enable %}
             {% for byte in range(data_width//8) %}
             if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];

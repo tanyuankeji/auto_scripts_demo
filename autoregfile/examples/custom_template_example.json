@@ -1,0 +1,92 @@
+{
+  "module_name": "custom_template_example",
+  "data_width": 32,
+  "addr_width": 8,
+  "bus_protocol": "custom",
+  
+  "bus_options": {
+    "template": "verilog/bus/custom.v.j2",
+    
+    "common": {
+      "timeout": {
+        "enable": true,
+        "cycles": 8,
+        "action": "interrupt"
+      },
+      "delay": {
+        "read": 1,
+        "write": 0,
+        "response": 2
+      }
+    }
+  },
+  
+  "registers": [
+    {
+      "name": "CTRL_REG",
+      "address": "0x00",
+      "type": "ReadWrite",
+      "reset_value": "0x00000000",
+      "description": "控制寄存器",
+      "fields": [
+        {
+          "name": "ENABLE",
+          "bits": "0",
+          "description": "全局使能"
+        },
+        {
+          "name": "START",
+          "bits": "1",
+          "description": "启动操作"
+        },
+        {
+          "name": "RESET",
+          "bits": "2",
+          "description": "复位"
+        }
+      ]
+    },
+    
+    {
+      "name": "STATUS_REG",
+      "address": "0x04",
+      "type": "ReadOnly",
+      "reset_value": "0x00000000",
+      "description": "状态寄存器",
+      "fields": [
+        {
+          "name": "BUSY",
+          "bits": "0",
+          "description": "忙状态",
+          "input": "busy_signal"
+        },
+        {
+          "name": "DONE",
+          "bits": "1",
+          "description": "完成状态",
+          "input": "done_signal"
+        }
+      ]
+    },
+    
+    {
+      "name": "TRIGGER_REG",
+      "address": "0x08",
+      "type": "Write1Pulse",
+      "reset_value": "0x00000000",
+      "description": "触发寄存器",
+      "fields": [
+        {
+          "name": "PULSE_EVENT",
+          "bits": "0",
+          "description": "脉冲事件触发"
+        },
+        {
+          "name": "CLEAR_FLAGS",
+          "bits": "1",
+          "description": "清除标志"
+        }
+      ]
+    }
+  ]
+} 
