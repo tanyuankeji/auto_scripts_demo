@@ -1,0 +1,116 @@
+{
+  "module_name": "enhanced_regfile",
+  "data_width": 32,
+  "addr_width": 8,
+  "bus_protocol": "apb",
+  "num_write_ports": 1,
+  "num_read_ports": 2,
+  "sync_reset": false,
+  "reset_value": "0x00000000",
+  "byte_enable": true,
+  "registers": [
+    {
+      "name": "CTRL_REG",
+      "address": "0x00",
+      "type": "ReadWrite",
+      "reset_value": "0x00000000",
+      "description": "控制寄存器",
+      "sw_access_type": "READ_WRITE",
+      "width": 32,
+      "locked_by": []
+    },
+    {
+      "name": "STATUS_REG",
+      "address": "0x04",
+      "type": "ReadOnly",
+      "reset_value": "0x00000000",
+      "description": "状态寄存器",
+      "sw_access_type": "READ",
+      "hw_access_type": "WRITE",
+      "width": 32,
+      "locked_by": []
+    },
+    {
+      "name": "LOCK_REG",
+      "address": "0x08",
+      "type": "ReadWrite",
+      "reset_value": "0x00000000",
+      "description": "锁定寄存器",
+      "sw_access_type": "READ_WRITE",
+      "width": 32,
+      "locked_by": []
+    },
+    {
+      "name": "MAGIC_REG",
+      "address": "0x0C",
+      "type": "ReadWrite",
+      "reset_value": "0xDEADBEEF",
+      "description": "魔术数字寄存器",
+      "sw_access_type": "READ_WRITE",
+      "locked_by": [
+        "LOCK_REG.LOCK_BIT"
+      ],
+      "width": 32
+    }
+  ],
+  "fields": [
+    {
+      "register": "CTRL_REG",
+      "name": "ENABLE",
+      "bit_range": "0",
+      "type": "ReadWrite",
+      "reset_value": "0",
+      "description": "使能位",
+      "sw_access_type": "READ_WRITE",
+      "function": "控制系统工作使能",
+      "locked_by": [
+        "LOCK_REG.LOCK_BIT"
+      ]
+    },
+    {
+      "register": "CTRL_REG",
+      "name": "START",
+      "bit_range": "1",
+      "type": "ReadWrite",
+      "reset_value": "0",
+      "description": "启动位",
+      "sw_access_type": "WRITE",
+      "function": "启动一次操作，需要魔术数字"
+    },
+    {
+      "register": "STATUS_REG",
+      "name": "BUSY",
+      "bit_range": "0",
+      "type": "ReadOnly",
+      "reset_value": "0",
+      "description": "忙状态标志",
+      "sw_access_type": "READ",
+      "hw_access_type": "WRITE",
+      "function": "表示系统当前正在工作中"
+    },
+    {
+      "register": "LOCK_REG",
+      "name": "LOCK_BIT",
+      "bit_range": "0",
+      "type": "ReadWrite",
+      "reset_value": "0",
+      "description": "锁定位",
+      "sw_access_type": "READ_WRITE",
+      "function": "锁定配置，防止意外修改"
+    },
+    {
+      "register": "MAGIC_REG",
+      "name": "MAGIC_VALUE",
+      "bit_range": "31:0",
+      "type": "ReadWrite",
+      "reset_value": "0xDEADBEEF",
+      "description": "魔术数字值",
+      "sw_access_type": "READ_WRITE",
+      "function": "用于授权访问的魔术数字"
+    }
+  ],
+  "default_reg_type": "ReadWrite",
+  "implementation": "instance",
+  "auto_address": false,
+  "memory_map": "# 内存映射\n\n"
+}

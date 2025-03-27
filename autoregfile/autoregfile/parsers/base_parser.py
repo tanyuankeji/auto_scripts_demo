@@ -105,6 +105,50 @@ class ConfigParser:
         # 处理字段定义
         if "fields" not in config or not config["fields"]:
             config["fields"] = []
+            
+        # 为每个字段添加扩展属性和默认值
+        for field in config["fields"]:
+            # 检查必需字段
+            if "register" not in field:
+                raise ValueError(f"字段 '{field.get('name', '<未命名>')}' 缺少寄存器引用")
+                
+            if "name" not in field:
+                raise ValueError(f"寄存器 '{field['register']}' 的字段缺少名称")
+                
+            if "bit_range" not in field:
+                raise ValueError(f"字段 '{field['register']}.{field['name']}' 缺少位范围定义")
+            
+            # 查找关联的寄存器
+            register = next((r for r in config["registers"] if r["name"] == field["register"]), None)
+            if not register:
+                print(f"警告: 字段 '{field['name']}' 引用了不存在的寄存器 '{field['register']}'")
+                continue
+            
+            # 设置字段默认值，优先从字段属性获取，如果没有则从寄存器属性继承
+            if "type" not in field:
+                field["type"] = register.get("type", config["default_reg_type"])
+                
+            if "reset_value" not in field:
+                field["reset_value"] = register.get("reset_value", config["reset_value"])
+            
+            if "description" not in field:
+                field["description"] = f"字段 {field['name']}"
+                
+            # 新增：锁定依赖字段
+            if "locked_by" not in field:
+                field["locked_by"] = []
+                
+            # 新增：字段功能描述
+            if "function" not in field:
+                field["function"] = ""
+                
+            # 新增：软件访问类型，继承自寄存器或使用默认值
+            if "sw_access_type" not in field:
+                field["sw_access_type"] = register.get("sw_access_type", "READ_WRITE")
+                
+            # 新增：硬件访问类型，继承自寄存器或使用默认值空字符串
+            if "hw_access_type" not in field:
+                field["hw_access_type"] = register.get("hw_access_type", "")
         
         # 处理锁定关系
         if "lock_relations" in config and config["lock_relations"]:

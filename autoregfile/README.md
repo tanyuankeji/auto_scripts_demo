@@ -1,16 +1,39 @@
-# AutoRegFile - 自动寄存器文件生成器
+# AutoRegFile - 自动寄存器文件生成工具
 
-AutoRegFile是一个用于自动生成RTL寄存器文件的工具，支持多种寄存器类型和特性，以及自动地址分配和多种总线协议。
+AutoRegFile是一个用于自动生成寄存器文件的工具，支持从多种格式的配置文件生成Verilog代码、APB总线接口、C语言头文件和文档。
 
-## 主要特性
+## 特性
 
-1. 支持多种寄存器类型（ReadOnly, ReadWrite, WriteOnly, Write1Clean, Write1Set等）
-2. 支持寄存器锁定（通过其他寄存器的值锁定寄存器）
-3. 自动进行寄存器地址分配和管理
-4. 支持多个地址块配置
-5. 支持多种总线协议（APB, AXI-Lite, 自定义总线）
-6. 生成字段级别的访问控制逻辑
-7. 生成完整的文档
+- 多种配置格式支持:
+  - JSON配置
+  - Excel配置（包括原有单表格格式、层次化设计、多表分离设计和改进层次化设计）
+  - YAML配置
+- 自动检测Excel配置格式
+- 代码生成:
+  - Verilog寄存器文件
+  - APB总线接口
+  - C语言头文件
+- 文档生成:
+  - Markdown格式
+- 支持多种寄存器类型:
+  - ReadWrite (标准读写寄存器)
+  - ReadOnly (只读寄存器)
+  - WriteOnly (只写寄存器)
+  - Write1Clean (写1清零寄存器)
+  - Write1Set (写1置位寄存器)
+  - Write0Clean (写0清零寄存器)
+  - Write0Set (写0置位寄存器)
+  - WriteOnce (只能写一次的寄存器)
+  - WriteOnlyOnce (只能写一次且只写的寄存器)
+  - ReadClean (读取后自动清零寄存器)
+  - ReadSet (读取后自动置位寄存器)
+  - WriteReadClean (可写且读取后自动清零寄存器)
+  - WriteReadSet (可写且读取后自动置位寄存器)
+  - Write1Pulse (写1产生脉冲寄存器)
+  - Write0Pulse (写0产生脉冲寄存器)
+- 支持字段级特性:
+  - 锁依赖（某字段只有在特定条件下才能修改）
+  - 魔数依赖（需要先向某寄存器写入特定值才能修改）
 
 ## 安装
 
@@ -18,209 +41,95 @@ AutoRegFile是一个用于自动生成RTL寄存器文件的工具，支持多种
 pip install autoregfile
 ```
 
-## 基本用法
+## 使用方法
 
-1. 创建一个JSON配置文件，描述你的寄存器文件
-2. 使用命令行工具生成RTL代码
-
-```bash
-python -m autoregfile.regfile_gen -c config.json -o regfile.v
-```
-
-## 配置文件格式
-
-配置文件是一个JSON文件，包含以下部分：
-
-```json
-{
-    "module_name": "my_regfile",
-    "data_width": 32,
-    "addr_width": 8,
-    "bus_protocol": "apb",
-    "registers": [
-        {
-            "name": "CTRL_REG",
-            "address": "0x00",
-            "type": "ReadWrite",
-            "reset_value": "0x00000000",
-            "description": "Control Register",
-            "fields": [
-                {
-                    "name": "ENABLE",
-                    "bits": "0",
-                    "description": "Enable bit"
-                },
-                {
-                    "name": "MODE",
-                    "bits": "2:1",
-                    "description": "Mode selection"
-                }
-            ]
-        }
-    ]
-}
-```
-
-## 支持的寄存器类型
-
-AutoRegFile支持多种寄存器类型，适应不同的使用场景：
-
-1. **ReadWrite** - 标准读写寄存器
-2. **ReadOnly** - 只读寄存器，写操作无效
-3. **WriteOnly** - 只写寄存器，读取返回0
-4. **Write1Clean** - 写1清零寄存器 (写1到某位将清零该位)
-5. **Write1Set** - 写1置位寄存器 (写1到某位将置位该位)
-6. **Write0Clean** - 写0清零寄存器 (写0到某位将清零该位)
-7. **Write0Set** - 写0置位寄存器 (写0到某位将置位该位)
-8. **WriteOnce** - 只能写一次的寄存器
-9. **WriteOnlyOnce** - 只能写一次且只写的寄存器
-10. **ReadClean** - 读取后自动清零的寄存器
-11. **ReadSet** - 读取后自动置位的寄存器
-12. **WriteReadClean** - 可写且读取后自动清零的寄存器
-13. **WriteReadSet** - 可写且读取后自动置位的寄存器
-14. **Write1Pulse** - 写1产生脉冲的寄存器
-15. **Write0Pulse** - 写0产生脉冲的寄存器
-
-## 寄存器锁定功能
-
-AutoRegFile支持通过另一个寄存器的值锁定寄存器，这在需要防止运行时修改某些配置时非常有用：
-
-```json
-{
-    "name": "CONFIG_REG",
-    "type": "ReadWrite",
-    "locked_by": ["CTRL_REG"],
-    "description": "配置寄存器（当CTRL_REG[0]=1时锁定）"
-}
-```
-
-在上面的例子中，当`CTRL_REG`的第0位为1时，`CONFIG_REG`将被锁定，不能被修改。
-
-## 地址规划功能
-
-AutoRegFile支持自动的寄存器地址分配和冲突检测功能：
-
-1. 自动分配寄存器地址，不需要手动指定
-2. 支持管理多个地址块，每个地址块有自己的地址空间
-3. 自动检测地址冲突和对齐问题
-4. 生成内存映射文档
-
-要启用地址规划功能，可以在配置文件中设置`auto_address: true`，或使用命令行选项`--auto-address`：
+### 命令行方式
 
 ```bash
-python -m autoregfile.regfile_gen -c config.json -o regfile.v --auto-address
+# 从配置文件生成寄存器文件
+autoregfile -i config.json -o output_directory
+
+# 显示帮助信息
+autoregfile --help
 ```
 
-多地址块配置示例：
+### Python代码方式
 
-```json
-{
-    "module_name": "multi_block_example",
-    "data_width": 32,
-    "addr_width": 12,
-    "address_blocks": [
-        {
-            "name": "CONTROL",
-            "base_address": "0x000",
-            "size": "0x100",
-            "description": "控制寄存器区域"
-        },
-        {
-            "name": "STATUS",
-            "base_address": "0x100",
-            "size": "0x100",
-            "description": "状态寄存器区域"
-        }
-    ],
-    "registers": [
-        {
-            "name": "CTRL_REG",
-            "block": "CONTROL",
-            "type": "ReadWrite"
-        },
-        {
-            "name": "STATUS_REG",
-            "block": "STATUS",
-            "type": "ReadOnly"
-        }
-    ]
-}
+```python
+from autoregfile.parsers import JSONParser, ExcelParser, YAMLParser
+from autoregfile.generators import VerilogGenerator, HeaderGenerator, DocGenerator
+from autoregfile.regfile_gen import generate_regfile
+
+# 解析配置文件
+parser = ExcelParser()  # 或JSONParser()、YAMLParser()
+config = parser.parse("config.xlsx")  # 支持的Excel格式将被自动检测
+
+# 生成Verilog寄存器文件
+verilog_gen = VerilogGenerator()
+verilog_code = verilog_gen.generate(config)
+verilog_gen.save(verilog_code, "output.v")
+
+# 生成APB总线接口
+generate_regfile("config.json", "output_apb.v", False, 'apb')
+
+# 生成C语言头文件
+header_gen = HeaderGenerator()
+header_code = header_gen.generate(config)
+header_gen.save(header_code, "output.h")
+
+# 生成Markdown文档
+doc_gen = DocGenerator()
+doc_content = doc_gen.generate(config)
+doc_gen.save(doc_content, "output.md")
 ```
 
-## 总线协议支持
+## Excel格式支持
 
-AutoRegFile支持多种总线协议，可以根据需要选择适合项目的总线接口。当前支持的总线协议包括：
+AutoRegFile支持四种Excel配置格式：
 
-1. **APB总线** - ARM外设总线，简单易用，适合低速外设
-2. **AXI-Lite总线** - ARM高级可扩展接口的简化版本，适合寄存器访问
-3. **自定义总线** - 简单的自定义总线接口，可根据需要调整
+1. **原有单表格格式**：最早实现的格式，全部信息放在同一个表格中
+2. **层次化设计**：使用`row_type`列区分寄存器和字段
+3. **多表分离设计**：将配置、寄存器和字段分开存储在不同的表格中
+4. **改进层次化设计（推荐）**：使用`register`和`field`两列区分寄存器和字段，更符合实际阅读习惯
 
-要指定使用的总线协议，可以在配置文件中设置`bus_protocol`字段，或使用命令行选项`--bus-protocol`：
+详细说明请参考文档：[Excel格式使用指南](docs/excel_format_guide.md) 和 [改进层次化设计详解](docs/improved_hierarchical_design.md)。
+
+## 示例
+
+查看 [examples](examples/) 目录获取更多示例：
+
+- [基本用法](examples/basic_usage.py)
+- [Excel配置示例](examples/excel_example.py)
+- [改进Excel格式](examples/improved_excel_format.py)
+- [测试所有寄存器类型](examples/test_all_reg_types.py)
+
+## 文档
+
+详细文档请参考 [docs](docs/) 目录：
+
+- [用户指南](docs/user_guide.md)
+- [Excel格式使用指南](docs/excel_format_guide.md)
+- [改进层次化设计详解](docs/improved_hierarchical_design.md)
+- [API文档](docs/api_docs.md)
+
+## 开发
+
+### 单元测试
 
 ```bash
-python -m autoregfile.regfile_gen -c config.json -o regfile.v --bus-protocol apb
+pytest tests/
 ```
 
-每种总线协议的示例配置文件可以在`examples`目录中找到：
-- `apb_protocol.json` - APB总线示例
-- `axi_lite_protocol.json` - AXI-Lite总线示例
+### 构建
 
-### APB总线接口
-
-APB总线是一种简单的低速总线，接口信号包括：
-- `paddr` - 地址信号
-- `psel` - 选择信号
-- `penable` - 使能信号
-- `pwrite` - 写信号
-- `pwdata` - 写数据
-- `prdata` - 读数据
-- `pready` - 就绪信号
-- `pslverr` - 错误信号
-
-### AXI-Lite总线接口
-
-AXI-Lite是AXI协议的简化版本，提供更全面的总线功能，接口信号包括：
-- 写地址通道 (AWADDR, AWVALID, AWREADY)
-- 写数据通道 (WDATA, WSTRB, WVALID, WREADY)
-- 写响应通道 (BRESP, BVALID, BREADY)
-- 读地址通道 (ARADDR, ARVALID, ARREADY)
-- 读数据通道 (RDATA, RRESP, RVALID, RREADY)
-
-### 自定义总线接口
-
-自定义总线提供了一个简单的接口，适合快速定制的场景，接口信号包括：
-- `addr` - 地址信号
-- `chip_select` - 片选信号
-- `write_en` - 写使能
-- `read_en` - 读使能
-- `write_data` - 写数据
-- `read_data` - 读数据
-- `data_valid` - 数据有效信号
-
-## 命令行选项
-
-AutoRegFile提供了多个命令行选项来控制生成过程：
-
+```bash
+python setup.py build
 ```
-usage: regfile_gen.py [-h] -c CONFIG -o OUTPUT [--auto-address] [--bus-protocol {apb,axi_lite,custom}]
-
-Register file generator
-
-options:
-  -h, --help            显示帮助信息并退出
-  -c CONFIG, --config CONFIG
-                        配置文件 (JSON)
-  -o OUTPUT, --output OUTPUT
-                        输出文件名
-  --auto-address        启用自动地址分配
-  --bus-protocol {apb,axi_lite,custom}
-                        使用的总线协议 (默认: custom)
-```
-
-## 贡献
-
-欢迎贡献代码，请参阅`CONTRIBUTING.md`了解更多信息。
 
 ## 许可证
 
-本项目采用MIT许可证。
+MIT
+
+## 贡献
+
+欢迎提交问题和功能请求。如果您想贡献代码，请提交pull request。

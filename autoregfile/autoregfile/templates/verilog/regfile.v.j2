@@ -1,52 +1,137 @@
-{# Verilog寄存器文件模板 #}
-// 自动生成的寄存器文件
-// 生成时间: {{ timestamp }}
-// 生成器版本: {{ generator_version }}
+// =============================================================================
+// 自动生成的寄存器文件: {{ module_name }}
+// 
+// 生成时间: {{ generation_time }}
+// 工具版本: {{ tool_version }}
+// =============================================================================
+`timescale 1ns / 1ps
 
 module {{ module_name }} (
-    input wire                      clk,
-    input wire                      rst_n,
+    // 时钟和复位
+    input wire                         clk,
+    input wire                         rst_n,
     
-{% for i in range(num_write_ports) %}
-    // 写端口 {{ i }}
-    input wire                      wr_en_{{ i }},
-    input wire [{{ addr_width-1 }}:0]  wr_addr_{{ i }},
-    input wire [{{ data_width-1 }}:0]  wr_data_{{ i }},
-{% if byte_enable %}
-    input wire [{{ (data_width//8)-1 }}:0]  wr_be_{{ i }},
-{% endif %}
-{% endfor %}
-    
-{% for i in range(num_read_ports) %}
-{% if i == 0 and num_write_ports > 0 %}
-    // 读端口 {{ i }}
-{% endif %}
-{% if i < num_read_ports - 1 %}
-    input wire [{{ addr_width-1 }}:0]  rd_addr_{{ i }},
-    output reg [{{ data_width-1 }}:0]  rd_data_{{ i }},
+    // 总线接口
+{% if bus_protocol == 'apb' %}
+    // APB总线接口
+    input wire [{{ addr_width-1 }}:0]  paddr,
+    input wire                         psel,
+    input wire                         penable,
+    input wire                         pwrite,
+    input wire [{{ data_width-1 }}:0]  pwdata,
+    output reg [{{ data_width-1 }}:0]  prdata,
+    output reg                         pready,
+    output reg                         pslverr
+{% elif bus_protocol == 'axi_lite' %}
+    // AXI-Lite总线接口
+    // 写地址通道
+    input wire [{{ addr_width-1 }}:0]  awaddr,
+    input wire                         awvalid,
+    output reg                         awready,
+    // 写数据通道
+    input wire [{{ data_width-1 }}:0]  wdata,
+    input wire [{{ (data_width//8)-1 }}:0] wstrb,
+    input wire                         wvalid,
+    output reg                         wready,
+    // 写响应通道
+    output reg [1:0]                  bresp,
+    output reg                         bvalid,
+    input wire                         bready,
+    // 读地址通道
+    input wire [{{ addr_width-1 }}:0]  araddr,
+    input wire                         arvalid,
+    output reg                         arready,
+    // 读数据通道
+    output reg [{{ data_width-1 }}:0]  rdata,
+    output reg [1:0]                  rresp,
+    output reg                         rvalid,
+    input wire                         rready
 {% else %}
-    input wire [{{ addr_width-1 }}:0]  rd_addr_{{ i }},
-    output reg [{{ data_width-1 }}:0]  rd_data_{{ i }}{% if has_pulse_registers %},{% endif %}
+    // 自定义总线接口
+    input wire [{{ addr_width-1 }}:0]  addr,
+    input wire                         chip_select,
+    input wire                         write_en,
+    input wire                         read_en,
+    input wire [{{ data_width-1 }}:0]  write_data,
+    output reg [{{ data_width-1 }}:0]  read_data,
+    output reg                         data_valid{% if byte_enable %},
+    input wire [{{ (data_width//8)-1 }}:0] byte_enable{% endif %}
+{% endif %}
+
+{% if registers %}
+    // 硬件接口
+{% for reg in registers %}
+{% if reg.get('hw_access_type', '') in ['READ', 'READ_WRITE'] %}
+{% set reg_lower = reg.name|lower %}
+    // {{ reg.name }} - 硬件读接口 
+    output wire [{{ reg.width|default(data_width)-1 }}:0] {{ reg_lower }}_hwout,
+{% endif %}
+{% if reg.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+{% set reg_lower = reg.name|lower %}
+    // {{ reg.name }} - 硬件写接口
+    input wire [{{ reg.width|default(data_width)-1 }}:0] {{ reg_lower }}_hwin,
+    input wire {{ reg_lower }}_hwen,
 {% endif %}
 {% endfor %}
 
-{% if has_pulse_registers %}
-    // 脉冲输出信号
-{% for reg in registers %}{% if reg.type == 'Write1Pulse' or reg.type == 'Write0Pulse' %}
-    output reg [{{ data_width-1 }}:0]  {{ reg.name|lower }}_pulse{% if not loop.last %},{% endif %}
-{% endif %}{% endfor %}
+{% for field in fields %}
+{% if field.get('hw_access_type', '') in ['READ', 'READ_WRITE'] %}
+{% set bit_width = get_bit_width(field.bit_range) %}
+{% if bit_width > 1 %}
+    // {{ field.register }}.{{ field.name }} - 硬件读接口
+    output wire [{{ bit_width-1 }}:0] {{ field.register|lower }}_{{ field.name|lower }}_hwout,
+{% else %}
+    // {{ field.register }}.{{ field.name }} - 硬件读接口
+    output wire {{ field.register|lower }}_{{ field.name|lower }}_hwout,
 {% endif %}
+{% endif %}
+{% if field.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+{% set bit_width = get_bit_width(field.bit_range) %}
+{% if bit_width > 1 %}
+    // {{ field.register }}.{{ field.name }} - 硬件写接口
+    input wire [{{ bit_width-1 }}:0] {{ field.register|lower }}_{{ field.name|lower }}_hwin,
+    input wire {{ field.register|lower }}_{{ field.name|lower }}_hwen,
+{% else %}
+    // {{ field.register }}.{{ field.name }} - 硬件写接口
+    input wire {{ field.register|lower }}_{{ field.name|lower }}_hwin,
+    input wire {{ field.register|lower }}_{{ field.name|lower }}_hwen,
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+    // 测试端口（可选）
+    input wire                         test_mode
 );
 
 {% if registers %}
-// 寄存器地址常量定义
+// 地址定义
 {% for reg in registers %}
-localparam ADDR_{{ reg.name|upper }} = {{ addr_width }}'h{{ '%X' % reg.address|int(0) }};   // {{ reg.description }}{% if reg.type %} ({{ reg.type }}类型){% endif %}
+localparam ADDR_{{ reg.name|upper }} = {{ addr_width }}'h{{ reg.address|replace('0x', '') }};
 {% endfor %}
 
+{% endif %}
+
+// 内部信号定义
+{% for i in range(num_write_ports) %}
+reg [{{ addr_width-1 }}:0] wr_addr_{{ i }};
+reg [{{ data_width-1 }}:0] wr_data_{{ i }};
+reg                      wr_en_{{ i }};
+{% if byte_enable %}
+reg [{{ (data_width//8)-1 }}:0] wr_be_{{ i }};
+{% endif %}
+{% endfor %}
+
+{% for i in range(num_read_ports) %}
+reg [{{ addr_width-1 }}:0] rd_addr_{{ i }};
+reg                      rd_en_{{ i }};
+reg [{{ data_width-1 }}:0] rd_data_{{ i }};
+{% endfor %}
+
+{% if registers %}
 // 寄存器声明
 {% for reg in registers %}
-reg [{{ reg.width|default(data_width)-1 }}:0] {{ reg.name|lower }}_reg;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.description }}
+reg [{{ reg.width|default(data_width)-1 }}:0] {{ reg.name|lower }}_reg;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.description|default(reg.name) }}
 {% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
 reg        {{ reg.name|lower }}_written;{{ ' ' * (20 - reg.name|lower|length) }}// {{ reg.name|lower }} 写标志
 {% endif %}
@@ -69,37 +154,77 @@ reg [{{ data_width-1 }}:0] reg_array [0:{{ 2**addr_width-1 }}];
 assign {{ reg.name|lower }}_locked = {% for locker in reg.locked_by %}{{ locker|lower }}_reg[0]{% if not loop.last %} || {% endif %}{% endfor %};
 {% endif %}
 {% endfor %}
+
+// 字段级锁定依赖
+{% for field in fields %}
+{% if field.get('locked_by') and field.get('locked_by')|length > 0 %}
+wire {{ field.register|lower }}_{{ field.name|lower }}_locked;
+assign {{ field.register|lower }}_{{ field.name|lower }}_locked = {% for locker in field.locked_by %}{% set lock_reg = locker.split('.')[0] %}{% set lock_bit = locker.split('.')[1]|lower %}{% set lock_reg_obj = get_register_by_name(registers, lock_reg) %}{{ lock_reg|lower }}_reg[{% for f in fields %}{% if f.register == lock_reg and f.name == lock_bit %}{% set bit_start, bit_end = get_bit_range(f.bit_range) %}{{ bit_start }}{% endif %}{% endfor %}]{% if not loop.last %} || {% endif %}{% endfor %};
+{% endif %}
+{% endfor %}
 {% endif %}
 
-// 复位和写逻辑
+{% if has_magic_deps %}
+// 魔术数字依赖逻辑
+{% for reg in registers %}
+{% if reg.get('magic_dependency') %}
+wire {{ reg.name|lower }}_magic_valid;
+assign {{ reg.name|lower }}_magic_valid = {% for magic_dep in reg.magic_dependency %}{% set magic_reg = magic_dep.split('.')[0] %}{% set magic_reg_obj = get_register_by_name(registers, magic_reg) %}{{ magic_reg|lower }}_reg == {{ magic_reg_obj.get('magic_value', '32\'hDEADBEEF') }}{% if not loop.last %} && {% endif %}{% endfor %};
+{% endif %}
+{% endfor %}
+
+// 字段级魔术数字依赖
+{% for field in fields %}
+{% if field.get('magic_number_dep') %}
+wire {{ field.register|lower }}_{{ field.name|lower }}_magic_valid;
+assign {{ field.register|lower }}_{{ field.name|lower }}_magic_valid = {% set magic_value = field.get('magic_value', '32\'hDEADBEEF') %}{% set magic_reg = field.magic_number_dep.split('.')[0] %}{{ magic_reg|lower }}_reg == {{ magic_value }};
+{% endif %}
+{% endfor %}
+{% endif %}
+
+// 硬件访问输出连接
+{% for reg in registers %}
+{% if reg.get('hw_access_type', '') in ['READ', 'READ_WRITE'] %}
+assign {{ reg.name|lower }}_hwout = {{ reg.name|lower }}_reg;
+{% endif %}
+{% endfor %}
+
+{% for field in fields %}
+{% if field.get('hw_access_type', '') in ['READ', 'READ_WRITE'] %}
+{% set bit_start, bit_end = get_bit_range(field.bit_range) %}
+{% if bit_start == bit_end %}
+assign {{ field.register|lower }}_{{ field.name|lower }}_hwout = {{ field.register|lower }}_reg[{{ bit_start }}];
+{% else %}
+assign {{ field.register|lower }}_{{ field.name|lower }}_hwout = {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}];
+{% endif %}
+{% endif %}
+{% endfor %}
+
+{% if registers %}
+{% for reg in registers %}
+// {{ reg.name }} 寄存器复位和更新逻辑
+// 寄存器描述: {{ reg.description|default('无') }}
+// 类型: {{ reg.type|default('ReadWrite') }}
+// 默认值: {{ reg.reset_value|default('0x00000000') }}
 always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) begin
     if ({{ 'rst_n == 1\'b0' if sync_reset else '!rst_n' }}) begin
-{% if registers %}
-    {% for reg in registers %}
         {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'{{ 'h' if reg.reset_value|string|startswith('0x') else 'd' }}{{ reg.reset_value|string|replace('0x', '') }};
         {% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
         {{ reg.name|lower }}_written <= 1'b0;
         {% endif %}
-        {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
-        {{ reg.name|lower }}_pulse <= {{ reg.width|default(data_width) }}'d0;
-        {% endif %}
-    {% endfor %}
-{% else %}
-        integer i;
-        for (i = 0; i < {{ 2**addr_width }}; i = i + 1) begin
-            reg_array[i] <= {{ data_width }}'d{{ reset_value }};
-        end
-{% endif %}
     end
     else begin
-{% if registers %}
-    {% for i in range(num_write_ports) %}
-        {% for reg in registers %}
-        {# 根据寄存器类型生成不同的写逻辑 #}
         {% if reg.type == 'ReadOnly' or reg.type == 'Null' %}
-        // {{ reg.name }} 是{{ '只读' if reg.type == 'ReadOnly' else 'Null类型' }}寄存器，忽略写操作
+        // {{ reg.name }} 是{{ '只读' if reg.type == 'ReadOnly' else 'Null类型' }}寄存器，软件写操作被忽略
+        {% if reg.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+        // 硬件写逻辑
+        if ({{ reg.name|lower }}_hwen) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_hwin;
+        end
+        {% endif %}
         {% elif reg.type == 'WriteOnly' %}
-        // {{ reg.name }} 是WriteOnly类型寄存器
+        // {{ reg.name }} 是 WriteOnly 类型寄存器
+        {% for i in range(num_write_ports) %}
         if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
             {% if byte_enable %}
             {% for byte in range(data_width//8) %}
@@ -109,8 +234,16 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
             {{ reg.name|lower }}_reg <= wr_data_{{ i }};
             {% endif %}
         end
+        {% endfor %}
+        {% if reg.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+        // 硬件写逻辑
+        else if ({{ reg.name|lower }}_hwen) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_hwin;
+        end
+        {% endif %}
         {% elif reg.type == 'WriteOnce' or reg.type == 'WriteOnlyOnce' %}
-        // {{ reg.name }} 是{{ reg.type }}类型寄存器，只写一次
+        // {{ reg.name }} 是 {{ reg.type }} 类型寄存器，只写一次
+        {% for i in range(num_write_ports) %}
         if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }} && !{{ reg.name|lower }}_written) begin
             {% if byte_enable %}
             {% for byte in range(data_width//8) %}
@@ -121,8 +254,17 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
             {% endif %}
             {{ reg.name|lower }}_written <= 1'b1; // 设置写标志
         end
+        {% endfor %}
+        {% if reg.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+        // 硬件写逻辑
+        else if ({{ reg.name|lower }}_hwen && !{{ reg.name|lower }}_written) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_hwin;
+            {{ reg.name|lower }}_written <= 1'b1; // 设置写标志
+        end
+        {% endif %}
         {% elif reg.type == 'Write1Clean' %}
-        // {{ reg.name }} 是Write1Clean类型寄存器，写1清零对应位
+        // {{ reg.name }} 是 Write1Clean 类型寄存器，写1清零对应位
+        {% for i in range(num_write_ports) %}
         if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
             {% if byte_enable %}
             {% for byte in range(data_width//8) %}
@@ -132,92 +274,17 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
             {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~wr_data_{{ i }};
             {% endif %}
         end
-        {% elif reg.type == 'Write1Set' %}
-        // {{ reg.name }} 是Write1Set类型寄存器，写1置位对应位
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] | wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | wr_data_{{ i }};
-            {% endif %}
+        {% endfor %}
+        {% if reg.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+        // 硬件写逻辑
+        else if ({{ reg.name|lower }}_hwen) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_hwin;
         end
-        {% elif reg.type == 'Write0Clean' %}
-        // {{ reg.name }} 是Write0Clean类型寄存器，写0清零对应位
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] & (wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}] | ~wr_be_{{ i }}[{{ byte }}]);
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & wr_data_{{ i }};
-            {% endif %}
-        end
-        {% elif reg.type == 'Write0Set' %}
-        // {{ reg.name }} 是Write0Set类型寄存器，写0置位对应位
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] | (~wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}] & {8{wr_be_{{ i }}[{{ byte }}]}});
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | ~wr_data_{{ i }};
-            {% endif %}
-        end
-        {% elif reg.type == 'Write1Toggle' %}
-        // {{ reg.name }} 是Write1Toggle类型寄存器，写1翻转对应位
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] ^ (wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}] & {8{wr_be_{{ i }}[{{ byte }}]}});
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg ^ wr_data_{{ i }};
-            {% endif %}
-        end
-        {% elif reg.type == 'Write0Toggle' %}
-        // {{ reg.name }} 是Write0Toggle类型寄存器，写0翻转对应位
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] ^ (~wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}] & {8{wr_be_{{ i }}[{{ byte }}]}});
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg ^ ~wr_data_{{ i }};
-            {% endif %}
-        end
-        {% elif reg.type == 'Write1Pulse' %}
-        // {{ reg.name }} 是Write1Pulse类型寄存器，写1产生一个周期的脉冲
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_pulse[{{ byte*8+7 }}:{{ byte*8 }}] <= wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_pulse <= wr_data_{{ i }};
-            {% endif %}
-            {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'d0; // 寄存器始终为0
-        end else begin
-            {{ reg.name|lower }}_pulse <= {{ reg.width|default(data_width) }}'d0; // 脉冲只持续一个周期
-        end
-        {% elif reg.type == 'Write0Pulse' %}
-        // {{ reg.name }} 是Write0Pulse类型寄存器，写0产生一个周期的脉冲
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-            {% if byte_enable %}
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_pulse[{{ byte*8+7 }}:{{ byte*8 }}] <= ~wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}] & {8{1'b1}};
-            {% endfor %}
-            {% else %}
-            {{ reg.name|lower }}_pulse <= ~wr_data_{{ i }} & {{ '{%d{1\'b1}}' % reg.width|default(data_width) }};
-            {% endif %}
-            {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'d0; // 寄存器始终为0
-        end else begin
-            {{ reg.name|lower }}_pulse <= {{ reg.width|default(data_width) }}'d0; // 脉冲只持续一个周期
-        end
+        {% endif %}
         {% else %}
-        // {{ reg.name }} 是{{ reg.type }}类型寄存器
-        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}{% if reg.locked_by %} && !{{ reg.name|lower }}_locked{% endif %}) begin
+        // {{ reg.name }} 是 {{ reg.type|default('ReadWrite') }} 类型寄存器
+        {% for i in range(num_write_ports) %}
+        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ reg.name|upper }}{% if reg.locked_by %} && !{{ reg.name|lower }}_locked{% endif %}{% if reg.get('magic_dependency') %} && {{ reg.name|lower }}_magic_valid{% endif %}) begin
             {% if byte_enable %}
             {% for byte in range(data_width//8) %}
             if (wr_be_{{ i }}[{{ byte }}]) {{ reg.name|lower }}_reg[{{ byte*8+7 }}:{{ byte*8 }}] <= wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];
@@ -226,12 +293,16 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
             {{ reg.name|lower }}_reg <= wr_data_{{ i }};
             {% endif %}
         end
-        {% endif %}
         {% endfor %}
-    {% endfor %}
+        {% if reg.get('hw_access_type', '') in ['WRITE', 'READ_WRITE'] %}
+        // 硬件写逻辑
+        else if ({{ reg.name|lower }}_hwen) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_hwin;
+        end
+        {% endif %}
+        {% endif %}
 
         // 读操作触发的特殊逻辑
-    {% for reg in registers %}
         {% if reg.type in ['ReadClean', 'WriteReadClean'] %}
         // 如果读端口读取了{{ reg.name }}，则清零（{{ reg.type }}类型）
         if ({% for i in range(num_read_ports) %}{{ 'rd_addr_%d == ADDR_%s'|format(i, reg.name|upper) }}{{ ' || ' if not loop.last }}{% endfor %}) begin
@@ -249,60 +320,189 @@ always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) 
             {% endfor %}
         end
         {% endif %}
-    {% endfor %}
-{% else %}
-    {% for i in range(num_write_ports) %}
-        {% if byte_enable %}
-        if (wr_en_{{ i }}) begin
-            {% for byte in range(data_width//8) %}
-            if (wr_be_{{ i }}[{{ byte }}]) reg_array[wr_addr_{{ i }}][{{ byte*8+7 }}:{{ byte*8 }}] <= wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];
-            {% endfor %}
-        end
-        {% else %}
-        if (wr_en_{{ i }}) begin
-            reg_array[wr_addr_{{ i }}] <= wr_data_{{ i }};
-        end
-        {% endif %}
-    {% endfor %}
-{% endif %}
     end
-end
-
-{% for i in range(num_read_ports) %}
-// 读端口{{ i }} 组合逻辑
-always @(*) begin
-    // 默认值为全0
-    rd_data_{{ i }} = {{ data_width }}'d0;
-    
-{% if registers %}
-    {% if registers|length <= 8 %}
-    {# 对于寄存器数量较少的情况，使用if-else结构 #}
-    {% for reg in registers %}
-    {% if reg.type in ['Null', 'WriteOnly', 'WriteOnlyClean', 'WriteOnlySet', 'WriteOnlyOnce'] %}
-    // {{ reg.name }} 是{{ reg.type }}类型寄存器，读取时返回0
-    if (rd_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-        rd_data_{{ i }} = {{ reg.width|default(data_width) }}'d0;
-    end
-    {% else %}
-    // {{ reg.name }} 是{{ reg.type }}类型寄存器
-    if (rd_addr_{{ i }} == ADDR_{{ reg.name|upper }}) begin
-        rd_data_{{ i }} = {{ reg.name|lower }}_reg;
-    end
-    {% endif %}
-    {% endfor %}
-    {% else %}
-    {# 对于寄存器数量较多的情况，使用case结构 #}
-    case (rd_addr_{{ i }})
-    {% for reg in registers %}
-        ADDR_{{ reg.name|upper }}: rd_data_{{ i }} = {% if reg.type in ['Null', 'WriteOnly', 'WriteOnlyClean', 'WriteOnlySet', 'WriteOnlyOnce'] %}{{ reg.width|default(data_width) }}'d0{% else %}{{ reg.name|lower }}_reg{% endif %};  // {{ reg.type }} 类型
-    {% endfor %}
-        default: rd_data_{{ i }} = {{ data_width }}'d0;  // 未知地址返回0
-    endcase
-    {% endif %}
-{% else %}
-    rd_data_{{ i }} = reg_array[rd_addr_{{ i }}];
-{% endif %}
 end
 
 {% endfor %}
+
+{% for field in fields %}
+{% set bit_start, bit_end = get_bit_range(field.bit_range) %}
+{% set reg_obj = get_register_by_name(registers, field.register) %}
+{% set field_width = bit_end - bit_start + 1 %}
+{% set field_reset_value = field.get('reset_value', reg_obj.get('reset_value', '0x0')) %}
+{% set field_reset_value = get_field_reset_value(field_reset_value, field_width) %}
+
+// {{ field.register }}.{{ field.name }} 字段逻辑
+// 位位置: [{{ bit_end }}:{{ bit_start }}]
+// 描述: {{ field.description|default('无') }}
+// 功能: {{ field.get('function', '无特殊功能') }}
+// 类型: {{ field.get('type', reg_obj.get('type', 'ReadWrite')) }}
+// 默认值: {{ field_reset_value }}
+always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) begin
+    if ({{ 'rst_n == 1\'b0' if sync_reset else '!rst_n' }}) begin
+        {% if field_width > 1 %}
+        {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}] <= {{ field_width }}'{{ 'h' if field_reset_value|string|startswith('0x') else 'd' }}{{ field_reset_value|string|replace('0x', '') }};
+        {% else %}
+        {{ field.register|lower }}_reg[{{ bit_start }}] <= {{ field_reset_value }};
+        {% endif %}
+    end
+    else begin
+        {% set field_type = field.get('type', reg_obj.get('type', 'ReadWrite')) %}
+        {% set field_sw_access_type = field.get('sw_access_type', reg_obj.get('sw_access_type', 'READ_WRITE')) %}
+        {% set field_hw_access_type = field.get('hw_access_type', reg_obj.get('hw_access_type', '')) %}
+        
+        {% if field_sw_access_type in ['READ_WRITE', 'WRITE'] and field_type not in ['ReadOnly', 'Null'] %}
+        // 软件写逻辑
+        {% for i in range(num_write_ports) %}
+        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ field.register|upper }}{% if reg_obj and reg_obj.locked_by %} && !{{ field.register|lower }}_locked{% endif %}{% if field.get('locked_by') and field.get('locked_by')|length > 0 %} && !{{ field.register|lower }}_{{ field.name|lower }}_locked{% endif %}{% if field.get('magic_number_dep') %} && {{ field.register|lower }}_{{ field.name|lower }}_magic_valid{% endif %}) begin
+            {% if byte_enable %}
+            {% set byte_start = bit_start // 8 %}
+            {% set byte_end = bit_end // 8 %}
+            {% for byte in range(byte_start, byte_end + 1) %}
+            {% set byte_bit_start = max(bit_start, byte * 8) %}
+            {% set byte_bit_end = min(bit_end, (byte + 1) * 8 - 1) %}
+            {% set byte_bit_start_offset = byte_bit_start - byte * 8 %}
+            {% set byte_bit_end_offset = byte_bit_end - byte * 8 %}
+            {% if byte_bit_start == byte_bit_end %}
+            if (wr_be_{{ i }}[{{ byte }}]) {{ field.register|lower }}_reg[{{ byte_bit_start }}] <= wr_data_{{ i }}[{{ byte_bit_start_offset }}];
+            {% else %}
+            if (wr_be_{{ i }}[{{ byte }}]) {{ field.register|lower }}_reg[{{ byte_bit_end }}:{{ byte_bit_start }}] <= wr_data_{{ i }}[{{ byte_bit_end_offset }}:{{ byte_bit_start_offset }}];
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            {% if field_width > 1 %}
+            {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}] <= wr_data_{{ i }}[{{ bit_end }}:{{ bit_start }}];
+            {% else %}
+            {{ field.register|lower }}_reg[{{ bit_start }}] <= wr_data_{{ i }}[{{ bit_start }}];
+            {% endif %}
+            {% endif %}
+        end
+        {% endfor %}
+        {% endif %}
+        
+        {% if field_hw_access_type in ['WRITE', 'READ_WRITE'] %}
+        // 硬件写逻辑
+        {% if field_sw_access_type in ['READ_WRITE', 'WRITE'] and field_type not in ['ReadOnly', 'Null'] %}
+        else if ({{ field.register|lower }}_{{ field.name|lower }}_hwen{% if field.get('locked_by') and field.get('locked_by')|length > 0 %} && !{{ field.register|lower }}_{{ field.name|lower }}_locked{% endif %}) begin
+        {% else %}
+        if ({{ field.register|lower }}_{{ field.name|lower }}_hwen{% if field.get('locked_by') and field.get('locked_by')|length > 0 %} && !{{ field.register|lower }}_{{ field.name|lower }}_locked{% endif %}) begin
+        {% endif %}
+            {% if field_width > 1 %}
+            {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}] <= {{ field.register|lower }}_{{ field.name|lower }}_hwin;
+            {% else %}
+            {{ field.register|lower }}_reg[{{ bit_start }}] <= {{ field.register|lower }}_{{ field.name|lower }}_hwin;
+            {% endif %}
+        end
+        {% endif %}
+        
+        {% if field_type == 'Write1Clean' %}
+        // 写1清零逻辑
+        {% for i in range(num_write_ports) %}
+        if (wr_en_{{ i }} && wr_addr_{{ i }} == ADDR_{{ field.register|upper }}) begin
+            {% if byte_enable %}
+            {% set byte_start = bit_start // 8 %}
+            {% set byte_end = bit_end // 8 %}
+            {% for byte in range(byte_start, byte_end + 1) %}
+            {% set byte_bit_start = max(bit_start, byte * 8) %}
+            {% set byte_bit_end = min(bit_end, (byte + 1) * 8 - 1) %}
+            {% set byte_bit_start_offset = byte_bit_start - byte * 8 %}
+            {% set byte_bit_end_offset = byte_bit_end - byte * 8 %}
+            {% if byte_bit_start == byte_bit_end %}
+            if (wr_be_{{ i }}[{{ byte }}] && wr_data_{{ i }}[{{ byte_bit_start_offset }}]) 
+                {{ field.register|lower }}_reg[{{ byte_bit_start }}] <= 1'b0;
+            {% else %}
+            if (wr_be_{{ i }}[{{ byte }}]) 
+                {{ field.register|lower }}_reg[{{ byte_bit_end }}:{{ byte_bit_start }}] <= 
+                    {{ field.register|lower }}_reg[{{ byte_bit_end }}:{{ byte_bit_start }}] & 
+                    ~(wr_data_{{ i }}[{{ byte_bit_end_offset }}:{{ byte_bit_start_offset }}]);
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            {% if field_width > 1 %}
+            {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}] <= 
+                {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}] & ~(wr_data_{{ i }}[{{ bit_end }}:{{ bit_start }}]);
+            {% else %}
+            if (wr_data_{{ i }}[{{ bit_start }}]) 
+                {{ field.register|lower }}_reg[{{ bit_start }}] <= 1'b0;
+            {% endif %}
+            {% endif %}
+        end
+        {% endfor %}
+        {% endif %}
+        
+        {% if field_type in ['ReadClean', 'WriteReadClean'] %}
+        // 读取后自动清零
+        if ({% for i in range(num_read_ports) %}{{ 'rd_addr_%d == ADDR_%s'|format(i, field.register|upper) }}{{ ' || ' if not loop.last }}{% endfor %}) begin
+            {% if field_width > 1 %}
+            {{ field.register|lower }}_reg[{{ bit_end }}:{{ bit_start }}] <= {{ field_width }}'d0;
+            {% else %}
+            {{ field.register|lower }}_reg[{{ bit_start }}] <= 1'b0;
+            {% endif %}
+        end
+        {% endif %}
+    end
+end
+
+{% endfor %}
+{% else %}
+// 通用寄存器读写逻辑
+always @({{ 'posedge clk' if sync_reset else 'posedge clk or negedge rst_n' }}) begin
+    if ({{ 'rst_n == 1\'b0' if sync_reset else '!rst_n' }}) begin
+        integer i;
+        for (i = 0; i < {{ 2**addr_width }}; i = i + 1) begin
+            reg_array[i] <= {{ data_width }}'d{{ reset_value }};
+        end
+    end
+    else begin
+        {% for i in range(num_write_ports) %}
+        if (wr_en_{{ i }}) begin
+            {% if byte_enable %}
+            {% for byte in range(data_width//8) %}
+            if (wr_be_{{ i }}[{{ byte }}]) 
+                reg_array[wr_addr_{{ i }}][{{ byte*8+7 }}:{{ byte*8 }}] <= wr_data_{{ i }}[{{ byte*8+7 }}:{{ byte*8 }}];
+            {% endfor %}
+            {% else %}
+            reg_array[wr_addr_{{ i }}] <= wr_data_{{ i }};
+            {% endif %}
+        end
+        {% endfor %}
+    end
+end
+{% endif %}
+
+// 总线接口逻辑
+{% if bus_protocol == 'apb' %}
+{% include "bus/apb.v.j2" %}
+{% elif bus_protocol == 'axi_lite' %}
+{% include "bus/axi_lite.v.j2" %}
+{% else %}
+{% include "bus/custom.v.j2" %}
+{% endif %}
+
+// 读取逻辑
+always @(*) begin
+{% if registers %}
+    {% for i in range(num_read_ports) %}
+    rd_data_{{ i }} = {{ data_width }}'d0; // 默认值
+    
+    case (rd_addr_{{ i }})
+    {% for reg in registers %}
+        ADDR_{{ reg.name|upper }}: begin
+        {% if reg.type == 'WriteOnly' or reg.type == 'WriteOnlyOnce' %}
+            rd_data_{{ i }} = {{ data_width }}'d0; // 只写寄存器，读取返回0
+        {% else %}
+            rd_data_{{ i }} = {{ reg.name|lower }}_reg;
+        {% endif %}
+        end
+    {% endfor %}
+        default: rd_data_{{ i }} = {{ data_width }}'d0;
+    endcase
+    {% endfor %}
+{% else %}
+    {% for i in range(num_read_ports) %}
+    rd_data_{{ i }} = rd_en_{{ i }} ? reg_array[rd_addr_{{ i }}] : {{ data_width }}'d0;
+    {% endfor %}
+{% endif %}
+end
+
 endmodule 
