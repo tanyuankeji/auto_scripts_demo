@@ -18,7 +18,7 @@ extern "C" {
 /* 寄存器地址定义 */
 {% if registers %}
 {% for reg in registers %}
-#define {{ module_name|upper }}_{{ reg.name|upper }}_ADDR      0x{{ '%X' % reg.address|int(0) }}U  /**< {{ reg.description }} */
+#define {{ module_name|upper }}_{{ reg.name|upper }}_ADDR      {{ reg.address_hex|default('0x%X' % reg.address_int|default(reg.address|int(0))) }}U  /**< {{ reg.description }} */
 {% endfor %}
 {% endif %}
 
@@ -30,7 +30,10 @@ extern "C" {
 {% if fields is defined %}
 {% for field in fields %}
 /* {{ field.register }} - {{ field.name }} */
-{% if ':' in field.bit_range %}
+{% if field.msb is defined and field.lsb is defined %}
+#define {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_POS      {{ field.lsb }}U
+#define {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_MASK     ({{ '0x%X' % field.mask }}U)
+{% elif ':' in field.bit_range %}
 {% set msb, lsb = field.bit_range.split(':') %}
 #define {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_POS      {{ lsb }}U
 #define {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_MASK     ({{ '0x%X' % ((2 ** (int(msb)-int(lsb)+1)) - 1) }}U << {{ lsb }}U)
@@ -45,7 +48,14 @@ extern "C" {
 {% if fields is defined %}
 {% for field in fields %}
 /* {{ field.register }} - {{ field.name }} 读写宏 */
-{% if ':' in field.bit_range %}
+{% if field.msb is defined and field.lsb is defined %}
+#define {{ module_name|upper }}_GET_{{ field.register }}_{{ field.name }}(reg_val)  \
+    (((reg_val) & {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_MASK) >> {{ field.lsb }}U)
+    
+#define {{ module_name|upper }}_SET_{{ field.register }}_{{ field.name }}(reg_val, value)  \
+    (((reg_val) & ~{{ module_name|upper }}_{{ field.register }}_{{ field.name }}_MASK) | \
+    (((value) << {{ field.lsb }}U) & {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_MASK))
+{% elif ':' in field.bit_range %}
 {% set msb, lsb = field.bit_range.split(':') %}
 #define {{ module_name|upper }}_GET_{{ field.register }}_{{ field.name }}(reg_val)  \
     (((reg_val) & {{ module_name|upper }}_{{ field.register }}_{{ field.name }}_MASK) >> {{ lsb }}U)

@@ -62,7 +62,28 @@ class HeaderGenerator(BaseGenerator):
         """
         context = super().prepare_context(config)
         
-        # 添加特定于C语言头文件的处理
+        # 处理寄存器地址，确保地址格式正确
+        if 'registers' in context:
+            for reg in context['registers']:
+                # 确保地址是整数格式
+                if isinstance(reg['address'], str):
+                    if reg['address'].startswith('0x'):
+                        reg['address_hex'] = reg['address'].upper()
+                        reg['address_int'] = int(reg['address'], 16)
+                    else:
+                        # 尝试解析为整数
+                        try:
+                            addr_int = int(reg['address'])
+                            reg['address_int'] = addr_int
+                            reg['address_hex'] = f"0x{addr_int:X}"
+                        except ValueError:
+                            print(f"警告: 无法解析寄存器地址: {reg['address']}")
+                            reg['address_int'] = 0
+                            reg['address_hex'] = "0x0"
+                else:
+                    # 已经是整数
+                    reg['address_int'] = reg['address']
+                    reg['address_hex'] = f"0x{reg['address']:X}"
         
         # 处理位域信息
         if 'fields' in context:

@@ -62,7 +62,30 @@ class DocGenerator(BaseGenerator):
         """
         context = super().prepare_context(config)
         
-        # 处理位域信息 - 类似于HeaderGenerator中的处理
+        # 处理寄存器地址，确保地址格式正确
+        if 'registers' in context:
+            for reg in context['registers']:
+                # 确保地址是整数或十六进制字符串
+                if isinstance(reg['address'], str):
+                    if reg['address'].startswith('0x'):
+                        reg['address_hex'] = reg['address'].upper()
+                        reg['address_int'] = int(reg['address'], 16)
+                    else:
+                        # 尝试解析为整数
+                        try:
+                            addr_int = int(reg['address'])
+                            reg['address_int'] = addr_int
+                            reg['address_hex'] = f"0x{addr_int:X}"
+                        except ValueError:
+                            print(f"警告: 无法解析寄存器地址: {reg['address']}")
+                            reg['address_int'] = 0
+                            reg['address_hex'] = "0x0"
+                else:
+                    # 已经是整数
+                    reg['address_int'] = reg['address']
+                    reg['address_hex'] = f"0x{reg['address']:X}"
+        
+        # 处理位域信息
         if 'fields' in context:
             for field in context['fields']:
                 # 解析位域范围
@@ -101,10 +124,9 @@ class DocGenerator(BaseGenerator):
             memory_map += "|------|----------|------|------|\n"
             
             if 'registers' in context:
-                for reg in sorted(context['registers'], key=lambda r: int(r['address'], 16) if isinstance(r['address'], str) else r['address']):
-                    addr = reg['address']
-                    if isinstance(addr, str) and not addr.startswith('0x'):
-                        addr = f"0x{int(addr):X}"
+                # 按地址排序寄存器
+                for reg in sorted(context['registers'], key=lambda r: r['address_int'] if 'address_int' in r else (int(r['address'], 16) if isinstance(r['address'], str) and r['address'].startswith('0x') else int(r['address']))):
+                    addr = reg.get('address_hex', reg['address'])
                     memory_map += f"| {addr} | {reg['name']} | {reg.get('description', '')} | {reg.get('type', 'ReadWrite')} |\n"
             
             context['memory_map'] = memory_map

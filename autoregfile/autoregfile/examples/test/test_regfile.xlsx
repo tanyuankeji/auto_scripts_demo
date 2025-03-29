@@ -1,0 +1,16 @@
+# 此文件应该是Excel二进制格式
+# 请准备一个包含以下内容的Excel文件：
+# 
+# Sheet: Registers
+# 
+# 列名应包括：
+# - Register Name
+# - Address
+# - Description
+# - Type
+# - Fields
+# 
+# 示例数据：
+# Register1, 0x0000, 控制寄存器, RW, Field1(0:3)|Field2(4:7)
+# Register2, 0x0004, 状态寄存器, RO, Status(0:7)
+# Register3, 0x0008, 命令寄存器, WO, Command(0:15) 

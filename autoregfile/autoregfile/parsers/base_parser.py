@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-配置解析器基类
+基础配置解析器
 
-定义配置解析的通用接口。
+为不同格式的配置解析器提供基类。
 """
 
 from typing import Dict, Any, List, Optional, Type
@@ -19,7 +19,7 @@ class ConfigParser:
     @staticmethod
     def parse(config_source: str) -> Dict[str, Any]:
         """
-        解析配置
+        解析配置源
         
         参数:
             config_source: 配置源（文件路径或配置字符串）
@@ -27,7 +27,7 @@ class ConfigParser:
         返回:
             解析后的配置字典
         """
-        raise NotImplementedError("子类必须实现此方法")
+        raise NotImplementedError("子类必须实现parse方法")
     
     @classmethod
     def validate_config(cls, config: Dict[str, Any]) -> Dict[str, Any]:

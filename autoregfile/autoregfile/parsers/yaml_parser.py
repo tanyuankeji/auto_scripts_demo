@@ -22,28 +22,47 @@ class YamlParser(ConfigParser):
         解析YAML格式的配置
         
         参数:
-            config_source: 配置源（文件路径或YAML字符串）
+            config_source: 配置源（YAML文件路径）
             
         返回:
             解析后的配置字典
         """
-        # 确定是文件路径还是YAML字符串
-        if os.path.isfile(config_source):
-            with open(config_source, 'r', encoding='utf-8') as f:
-                config_str = f.read()
-        else:
-            config_str = config_source
+        if not os.path.isfile(config_source):
+            raise ValueError(f"文件不存在: {config_source}")
         
+        _, ext = os.path.splitext(config_source)
+        if ext.lower() not in ['.yml', '.yaml']:
+            raise ValueError(f"不支持的文件格式: {ext}")
+        
+        # 尝试使用不同的编码打开文件
         try:
-            # 解析YAML
-            config = yaml.safe_load(config_str)
-            
-            # 验证配置
-            return ConfigParser.validate_config(config)
+            # 首先尝试使用UTF-8编码
+            with open(config_source, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+        except UnicodeDecodeError:
+            # 如果UTF-8失败，尝试其他编码
+            try:
+                print("UTF-8编码读取失败，尝试使用GBK编码...")
+                with open(config_source, 'r', encoding='gbk') as f:
+                    config = yaml.safe_load(f)
+            except UnicodeDecodeError:
+                try:
+                    print("GBK编码读取失败，尝试使用CP936编码...")
+                    with open(config_source, 'r', encoding='cp936') as f:
+                        config = yaml.safe_load(f)
+                except UnicodeDecodeError:
+                    try:
+                        print("CP936编码读取失败，尝试使用latin-1编码...")
+                        with open(config_source, 'r', encoding='latin-1') as f:
+                            config = yaml.safe_load(f)
+                    except Exception as e:
+                        raise ValueError(f"无法解析YAML文件: {str(e)}，请检查文件编码")
         except yaml.YAMLError as e:
             raise ValueError(f"无效的YAML格式: {str(e)}")
         except Exception as e:
-            raise ValueError(f"解析YAML配置失败: {str(e)}")
+            raise ValueError(f"解析YAML文件时出错: {str(e)}")
+        
+        return config
 
 
 # 测试代码

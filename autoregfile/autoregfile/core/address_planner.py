@@ -6,8 +6,11 @@
 处理寄存器地址的规划、分配和冲突检测。
 """
 
-from typing import Dict, Any, List, Tuple, Optional, Set
+from typing import Dict, Any, List, Tuple, Optional, Set, Union
 import math
+import copy
+
+from ..utils import get_logger
 
 
 class AddressBlock:
@@ -92,10 +95,15 @@ class AddressBlock:
 
 
 class AddressPlanner:
-    """地址规划器类"""
+    """
+    地址规划器类
+    
+    负责对寄存器文件中的寄存器进行自动地址分配，支持多种分配策略。
+    """
     
     def __init__(self):
         """初始化地址规划器"""
+        self.logger = get_logger("address_planner")
         self.address_blocks: List[AddressBlock] = []
         self.address_map: Dict[int, Tuple[Dict[str, Any], AddressBlock]] = {}
     
@@ -162,96 +170,117 @@ class AddressPlanner:
         self.address_map[addr_int] = (register, block)
         block.add_register(register)
     
-    def auto_assign_addresses(self, config: Dict[str, Any], block_name: str = "main") -> Dict[str, Any]:
+    def auto_assign_addresses(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        自动分配地址
+        自动分配寄存器地址
         
-        参数:
-            config: 配置字典
-            block_name: 默认地址块名称
+        根据配置选项和策略为寄存器分配地址
+        
+        Args:
+            config: 寄存器配置字典
             
-        返回:
-            更新后的配置字典
+        Returns:
+            Dict[str, Any]: 更新后的配置字典
         """
-        # 提取配置信息
-        data_width = config.get("data_width", 32)
-        addr_width = config.get("addr_width", 8)
-        registers = config.get("registers", [])
-        
-        # 处理地址块配置
-        address_blocks = config.get("address_blocks", [])
-        
-        # 如果没有定义地址块，创建默认地址块
-        if not address_blocks:
-            # 计算地址块大小
-            block_size = 2 ** addr_width * (data_width // 8)
+        try:
+            # 创建配置副本，避免修改原始配置
+            new_config = copy.deepcopy(config)
             
-            # 创建主地址块
-            try:
-                main_block = self.add_address_block(block_name, 0, block_size, 
-                                                 f"{block_name} 地址空间")
-            except ValueError as e:
-                # 如果地址块已存在，找到它
-                main_block = next((block for block in self.address_blocks if block.name == block_name), None)
-                if main_block is None:
-                    raise e
-        else:
-            # 创建配置中定义的所有地址块
-            for block_config in address_blocks:
-                block_name = block_config.get("name", "block")
-                base_addr = block_config.get("base_address", 0)
-                size = block_config.get("size", 256)
-                description = block_config.get("description", f"{block_name} 地址空间")
-                
-                # 转换字符串地址
-                if isinstance(base_addr, str):
-                    if base_addr.startswith("0x") or base_addr.startswith("0X"):
-                        base_addr = int(base_addr, 16)
+            # 获取寄存器列表
+            registers = new_config.get('registers', [])
+            if not registers:
+                self.logger.warning("配置中没有寄存器，无需分配地址")
+                return new_config
+            
+            # 获取数据宽度（字节数）
+            data_width = new_config.get('data_width', 32)
+            byte_width = data_width // 8
+            
+            # 获取对齐方式
+            alignment = new_config.get('address_alignment', byte_width)
+            
+            # 获取基地址
+            base_address = 0
+            if 'base_address' in new_config:
+                base_value = new_config['base_address']
+                # 解析基地址，可以是整数或十六进制字符串
+                if isinstance(base_value, str):
+                    if base_value.startswith('0x') or base_value.startswith('0X'):
+                        base_address = int(base_value, 16)
                     else:
-                        base_addr = int(base_addr)
-                
-                try:
-                    self.add_address_block(block_name, base_addr, size, description)
-                except ValueError as e:
-                    print(f"警告: {str(e)}")
+                        try:
+                            base_address = int(base_value)
+                        except ValueError:
+                            self.logger.warning(f"无法解析基地址: {base_value}，使用默认值0")
+                            base_address = 0
+                else:
+                    base_address = int(base_value)
+            
+            self.logger.info(f"开始自动分配地址，基地址: 0x{base_address:X}, 对齐方式: {alignment}字节")
+            
+            # 查找现有的有效地址
+            existing_addresses = set()
+            for reg in registers:
+                if 'address' in reg and reg['address']:
+                    addr = self._parse_address(reg['address'])
+                    if addr is not None:
+                        existing_addresses.add(addr)
+            
+            # 当前地址
+            current_address = base_address
+            
+            # 为每个没有地址的寄存器分配地址
+            for reg in registers:
+                if 'address' not in reg or not reg['address']:
+                    # 找到下一个可用地址
+                    while current_address in existing_addresses:
+                        current_address += alignment
+                    
+                    # 分配地址
+                    reg['address'] = f"0x{current_address:X}"
+                    existing_addresses.add(current_address)
+                    self.logger.debug(f"为寄存器 {reg.get('name', 'unnamed')} 分配地址: {reg['address']}")
+                    
+                    # 更新下一个地址
+                    current_address += alignment
+            
+            self.logger.info(f"地址分配完成，共分配 {len(registers)} 个寄存器")
+            return new_config
+            
+        except Exception as e:
+            self.logger.exception(f"自动分配地址时发生异常: {str(e)}")
+            return config
+    
+    def _parse_address(self, address: Union[str, int]) -> Optional[int]:
+        """
+        解析地址字符串为整数
         
-        # 处理每个寄存器
-        for reg in registers:
-            if "address" in reg:
-                # 使用指定地址
-                block_name = reg.get("block", block_name)
-                block = next((b for b in self.address_blocks if b.name == block_name), None)
-                if block is None:
-                    print(f"警告: 寄存器 '{reg['name']}' 引用了未定义的地址块 '{block_name}'，使用默认地址块")
-                    block = self.address_blocks[0] if self.address_blocks else None
-                    if block is None:
-                        raise ValueError(f"无可用地址块用于寄存器 '{reg['name']}'")
+        Args:
+            address: 地址表示，可以是字符串(如"0x10")或整数
+            
+        Returns:
+            Optional[int]: 解析后的整数地址，解析失败返回None
+        """
+        try:
+            if isinstance(address, int):
+                return address
                 
-                try:
-                    self.register_address(reg, block)
-                except ValueError as e:
-                    print(f"警告: {str(e)}")
-            else:
-                # 自动分配地址
-                block_name = reg.get("block", block_name)
-                block = next((b for b in self.address_blocks if b.name == block_name), None)
-                if block is None:
-                    print(f"警告: 寄存器 '{reg['name']}' 引用了未定义的地址块 '{block_name}'，使用默认地址块")
-                    block = self.address_blocks[0] if self.address_blocks else None
-                    if block is None:
-                        raise ValueError(f"无可用地址块用于寄存器 '{reg['name']}'")
-                
-                addr = block.get_next_available_address(data_width)
-                reg["address"] = f"0x{addr:X}"
-                try:
-                    self.register_address(reg, block)
-                except ValueError as e:
-                    print(f"警告: {str(e)}")
-        
-        # 返回更新后的配置
-        updated_config = config.copy()
-        updated_config["registers"] = registers
-        return updated_config
+            if isinstance(address, str):
+                address = address.strip().lower()
+                if address.startswith('0x'):
+                    return int(address, 16)
+                elif address.startswith('0b'):
+                    return int(address, 2)
+                elif address.startswith('0'):
+                    return int(address, 8)
+                else:
+                    return int(address)
+                    
+            return None
+            
+        except (ValueError, TypeError):
+            self.logger.debug(f"无法解析地址: {address}")
+            return None
     
     def validate_addresses(self, config: Dict[str, Any]) -> List[str]:
         """

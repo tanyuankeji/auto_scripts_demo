@@ -6,7 +6,7 @@ AutoRegFile 主入口脚本
 """
 
 import sys
-from scripts.generate_regfile import main
+from autoregfile.regfile_gen import main
 
 if __name__ == "__main__":
     sys.exit(main()) 

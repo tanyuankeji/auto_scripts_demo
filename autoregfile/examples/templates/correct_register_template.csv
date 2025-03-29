@@ -1,0 +1,16 @@
+register,field,bit_range,type,reset_value,description,address,bits
+CTRL_REG,ENABLE,0:0,ReadWrite,0x0,使能位,0x00,
+CTRL_REG,MODE,2:1,ReadWrite,0x0,模式选择,,
+CTRL_REG,START,3:3,Write1Pulse,0x0,启动位（写1自动清零）,,
+STATUS_REG,BUSY,0:0,ReadOnly,0x0,忙状态标志,0x04,
+STATUS_REG,ERROR,1:1,ReadOnly,0x0,错误标志,,
+INT_FLAG_REG,DATA_READY,0:0,Write1Clean,0x0,数据就绪中断,0x08,
+WRITEONLY_REG,,,WriteOnly,0x0,只写寄存器,0x0C,7:0
+LOCK_TEST_REG,LOCKED_FIELD,7:0,ReadWrite,0x55,受锁控制的字段,0x14,
+LOCK_TEST_REG,MAGIC_FIELD,15:8,ReadWrite,0xAA,魔数控制的字段,,
+WRITE1SET_REG,,,Write1Set,0x0,写1置位寄存器,0x1C,7:0
+READ_CLEAN_REG,,,ReadClean,0x0,读取后自动清零寄存器,0x20,31:0
+WRITE_ONCE_REG,,,WriteOnce,0x0,只能写一次的寄存器,0x24,31:0
+PULSE_REG,TRIG0,0:0,Write1Pulse,0x0,触发脉冲0,0x28,
+PULSE_REG,TRIG1,1:1,Write1Pulse,0x0,触发脉冲1,,
+PULSE_NO_FIELD_REG,,,Write1Pulse,0x0,无子字段脉冲寄存器,0x2C,7:0 

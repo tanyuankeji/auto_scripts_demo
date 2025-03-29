@@ -17,22 +17,20 @@ module {{ module_name }} #(
     input  wire                      rst_n,               // 异步复位，低电平有效
     
     // Wishbone B4总线接口信号
+    input  wire                      wb_cyc_i,            // 总线周期信号
+    input  wire                      wb_stb_i,            // 选通信号
+    input  wire                      wb_we_i,             // 写使能信号
     input  wire [ADDR_WIDTH-1:0]     wb_adr_i,            // 地址输入
     input  wire [DATA_WIDTH-1:0]     wb_dat_i,            // 数据输入
     output wire [DATA_WIDTH-1:0]     wb_dat_o,            // 数据输出
-    input  wire                      wb_we_i,             // 写使能信号
-    input  wire [DATA_WIDTH/8-1:0]   wb_sel_i,            // 字节选通信号
-    input  wire                      wb_stb_i,            // 选通信号
-    input  wire                      wb_cyc_i,            // 总线周期信号
     output wire                      wb_ack_o,            // 确认信号
     output wire                      wb_err_o,            // 错误信号
+    input  wire [DATA_WIDTH/8-1:0]   wb_sel_i,            // 字节选通信号
     
-    {% if register_outputs %}
     // 寄存器信号
     {% for output in register_outputs %}
     {{ output.direction }} {% if output.width > 1 %}[{{ output.width-1 }}:0]{% endif %} {{ output.name }}{% if not loop.last %},{% endif %}
     {% endfor %}
-    {% endif %}
 );
 
     // 内部信号定义
@@ -71,7 +69,6 @@ module {{ module_name }} #(
     assign wb_err_o = wb_err_reg;
     assign wb_dat_o = wb_dat_reg;
     
-    {% if register_outputs %}
     // 寄存器信号定义
     {% for reg in registers %}
     reg [DATA_WIDTH-1:0]      {{ reg.name|lower }}_reg;     // {{ reg.description }}
@@ -79,7 +76,6 @@ module {{ module_name }} #(
     wire                      {{ reg.name|lower }}_locked;  // {{ reg.name }} 锁定信号
     {% endif %}
     {% endfor %}
-    {% endif %}
     
     // 输出信号连接
     {% for reg in registers %}
@@ -111,53 +107,32 @@ module {{ module_name }} #(
     {% endif %}
     {% endfor %}
     
-    // Wishbone状态机
+    // 寄存器读取信号生成
+    {% for reg in registers %}
+    {% if reg.type in ['ReadClean', 'ReadSet'] %}
+    reg {{ reg.name|lower }}_read_reg;
+    assign {{ reg.name|lower }}_read = {{ reg.name|lower }}_read_reg;
+    {% endif %}
+    {% endfor %}
+    
+    // 寄存器写入逻辑
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             wb_state <= IDLE;
-        end else begin
-            wb_state <= wb_next_state;
-        end
-    end
-    
-    // 下一状态逻辑
-    always @(*) begin
-        wb_next_state = wb_state;
-        
-        case (wb_state)
-            IDLE: begin
-                if (wb_read)
-                    wb_next_state = READ;
-                else if (wb_write)
-                    wb_next_state = WRITE;
-            end
-            
-            READ: begin
-                wb_next_state = RESPONSE;
-            end
-            
-            WRITE: begin
-                wb_next_state = RESPONSE;
-            end
-            
-            RESPONSE: begin
-                if (!wb_valid)
-                    wb_next_state = IDLE;
-            end
-            
-            default: begin
-                wb_next_state = IDLE;
-            end
-        endcase
-    end
-    
-    // 总线状态控制逻辑
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
             wb_ack_reg <= 1'b0;
             wb_err_reg <= 1'b0;
             wb_dat_reg <= {DATA_WIDTH{1'b0}};
+            
+            // 寄存器复位值初始化
+            {% for reg in registers %}
+            {{ reg.name|lower }}_reg <= {{ reg.reset_value }};
+            {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+            {{ reg.name|lower }}_pulse_reg <= {DATA_WIDTH{1'b0}};
+            {% endif %}
+            {% endfor %}
         end else begin
+            wb_state <= wb_next_state;
+            
             case (wb_state)
                 IDLE: begin
                     wb_ack_reg <= 1'b0;
@@ -172,6 +147,9 @@ module {{ module_name }} #(
                             wb_dat_reg <= {{ reg.name|lower }}_reg;
                             wb_ack_reg <= 1'b1;
                             wb_err_reg <= 1'b0;
+                            {% if reg.type in ['ReadClean', 'ReadSet'] %}
+                            {{ reg.name|lower }}_read_reg <= 1'b1;
+                            {% endif %}
                         end
                         {% endfor %}
                         
@@ -288,9 +266,37 @@ module {{ module_name }} #(
                     wb_err_reg <= 1'b0;
                 end
             endcase
+            
+            // 清除脉冲寄存器 - 脉冲只持续一个时钟周期
+            {% for reg in registers %}
+            {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+            {{ reg.name|lower }}_pulse_reg <= {DATA_WIDTH{1'b0}};
+            {% endif %}
+            {% endfor %}
+            
+            // 写清除(Write1Clear)类型寄存器处理
+            {% for reg in registers %}
+            {% if reg.type == 'Write1Clear' %}
+            // 如果在WRITE状态且地址匹配，则执行写清除操作
+            if (wb_state == WRITE && reg_addr == 'h{{ reg.address|replace('0x', '') }} && wb_valid && wb_we_i) begin
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~wb_dat_i;
+            end
+            {% endif %}
+            {% endfor %}
+            
+            // 外部信号输入寄存器处理
+            {% for reg in registers %}
+            {% if reg.type == 'ReadOnly' %}
+            {% for field in reg.fields|default([]) %}
+            {% if field.input %}
+            {{ reg.name|lower }}_reg[{{ field.bits }}] <= {{ field.input }};
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% endfor %}
         end
     end
-    
+
     // 寄存器重置和更新逻辑
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -327,6 +333,33 @@ module {{ module_name }} #(
             {{ reg.name|lower }}_reg[{{ field.bits }}] <= {{ field.input }};
             {% endif %}
             {% endfor %}
+            {% endif %}
+            {% endfor %}
+        end
+    end
+
+    // 寄存器读取信号生成
+    {% for reg in registers %}
+    {% if reg.type in ['ReadClean', 'ReadSet'] %}
+    reg {{ reg.name|lower }}_read_reg;
+    assign {{ reg.name|lower }}_read = {{ reg.name|lower }}_read_reg;
+    {% endif %}
+    {% endfor %}
+
+    // 寄存器读取逻辑
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            // 清除读取事件标志
+            {% for reg in registers %}
+            {% if reg.type in ['ReadClean', 'ReadSet'] %}
+            {{ reg.name|lower }}_read_reg <= 1'b0;
+            {% endif %}
+            {% endfor %}
+        end else begin
+            // 读取信号生成
+            {% for reg in registers %}
+            {% if reg.type in ['ReadClean', 'ReadSet'] %}
+            {{ reg.name|lower }}_read_reg <= 1'b0;
             {% endif %}
             {% endfor %}
         end

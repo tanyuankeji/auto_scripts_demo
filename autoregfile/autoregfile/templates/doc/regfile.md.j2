@@ -10,74 +10,106 @@
 
 - 数据位宽: {{ data_width }} 位
 - 地址位宽: {{ addr_width }} 位
+{% if num_write_ports is defined %}
 - 写端口数量: {{ num_write_ports }}
+{% endif %}
+{% if num_read_ports is defined %}
 - 读端口数量: {{ num_read_ports }}
+{% endif %}
 
 ## 2. 内存映射
 
-{{ memory_map }}
+# 寄存器内存映射
+
+| 地址 | 寄存器名 | 描述 | 类型 |
+|------|----------|------|------|
+{% for reg in registers %}
+| {{ reg.address_hex|default('0x%X' % reg.address_int|default(reg.address|int(0))) }} | {{ reg.name }} | {{ reg.description }} | {{ reg.type }} |
+{% endfor %}
+
+{% if address_blocks is defined and address_blocks|length > 0 %}
+# 地址块映射
+
+| 块名 | 基地址 | 大小 | 描述 |
+|------|--------|------|------|
+{% for block in address_blocks %}
+| {{ block.name }} | {{ block.address_hex|default('0x%X' % block.base_address|int(0)) }} | {{ "0x%X"|format(block.size|int(0)) }} | {{ block.description }} |
+{% endfor %}
+{% endif %}
 
 ## 3. 寄存器列表
 
 | 寄存器名称 | 地址 | 类型 | 描述 |
 |------------|------|------|------|
 {% for reg in registers %}
-| {{ reg.name }} | {{ '0x%X' % reg.address|int(0) }} | {{ reg.type }} | {{ reg.description }} |
+| {{ reg.name }} | {{ reg.address_hex|default('0x%X' % reg.address_int|default(reg.address|int(0))) }} | {{ reg.type }} | {{ reg.description }} |
 {% endfor %}
 
 ## 4. 寄存器详细说明
 
 {% for reg in registers %}
-### 4.{{ loop.index }} {{ reg.name }} ({{ '0x%X' % reg.address|int(0) }})
+### 4.{{ loop.index }} {{ reg.name }} ({{ reg.address_hex|default('0x%X' % reg.address_int|default(reg.address|int(0))) }})
 
 **描述**: {{ reg.description }}
 
-**类型**: {{ reg.type }} {% if reg.type_info is defined %}({{ reg.type_info.description }}){% endif %}
-
-**复位值**: {{ '0x%X' % reg.reset_value|int(0) if reg.reset_value is defined else '0x0' }}
+**类型**: {% if reg.type == 'ReadWrite' %}{{ reg.type }} (标准读写寄存器)
+{% elif reg.type == 'ReadOnly' %}{{ reg.type }} (只读寄存器，忽略写操作)
+{% elif reg.type == 'WriteOnly' %}{{ reg.type }} (只写寄存器，读取时返回0)
+{% elif reg.type == 'Write1Clean' %}{{ reg.type }} (写1清零对应位，可读)
+{% elif reg.type == 'Write1Set' %}{{ reg.type }} (写1置位对应位，可读)
+{% elif reg.type == 'Write0Clean' %}{{ reg.type }} (写0清零对应位，可读)
+{% elif reg.type == 'Write0Set' %}{{ reg.type }} (写0置位对应位，可读)
+{% elif reg.type == 'WriteOnce' %}{{ reg.type }} (只能写入一次的寄存器，可读)
+{% elif reg.type == 'WriteOnlyOnce' %}{{ reg.type }} (只能写入一次且只写的寄存器，读取时返回0)
+{% elif reg.type == 'ReadClean' %}{{ reg.type }} (读取后自动清零的寄存器)
+{% elif reg.type == 'ReadSet' %}{{ reg.type }} (读取后自动置位的寄存器)
+{% elif reg.type == 'WriteReadClean' %}{{ reg.type }} (可写并读取后自动清零的寄存器)
+{% elif reg.type == 'WriteReadSet' %}{{ reg.type }} (可写并读取后自动置位的寄存器)
+{% elif reg.type == 'Write1Pulse' %}{{ reg.type }} (写1产生脉冲的寄存器)
+{% elif reg.type == 'Write0Pulse' %}{{ reg.type }} (写0产生脉冲的寄存器)
+{% else %}{{ reg.type }}{% endif %}
+**复位值**: {{ "0x%X"|format(reg.reset_value|int(0)) if reg.reset_value is defined else "0x0" }}
 
 **位域描述**:
 
-{% if register_fields and reg.name in register_fields %}
-
+{% set reg_fields = fields|selectattr("register", "equalto", reg.name)|list %}
+{% if reg_fields|length > 0 %}
 | 位域 | 位 | 访问类型 | 复位值 | 描述 |
 |------|---|----------|--------|------|
-{% for field in register_fields[reg.name] %}
-| {{ field.name }} | {{ field.bit_range }} | {{ field.type|default(reg.type) }} | {{ '0x%X' % field.reset_value|int(0) if field.reset_value is defined else '0x0' }} | {{ field.description }} |
+{% for field in reg_fields %}
+| {{ field.name }} | {{ field.bit_range }} | {{ field.access_type|default('ReadWrite') }} | {{ "0x%X"|format(field.reset_value|int(0)) if field.reset_value is defined else "0x0" }} | {{ field.description }} |
 {% endfor %}
-
-{% if reg.type in ['ReadOnly', 'Null', 'WriteOnly'] %}
-**注意**: 该寄存器为 {{ reg.type }} 类型，{% if reg.type == 'ReadOnly' %}只能读取，写入会被忽略{% elif reg.type == 'Null' %}不可读写{% else %}只能写入，读取将返回0{% endif %}。
-{% endif %}
-
-{% if reg.type in ['ReadClean', 'WriteReadClean'] %}
-**注意**: 该寄存器会在读取后自动清零。
-{% endif %}
-
-{% if reg.type in ['ReadSet', 'WriteReadSet'] %}
-**注意**: 该寄存器会在读取后自动置位。
-{% endif %}
-
-{% if reg.type in ['Write1Clean', 'Write0Clean'] %}
-**注意**: 写入{% if reg.type == 'Write1Clean' %}1{% else %}0{% endif %}可清零对应位。
-{% endif %}
-
-{% if reg.type in ['Write1Set', 'Write0Set'] %}
-**注意**: 写入{% if reg.type == 'Write1Set' %}1{% else %}0{% endif %}可置位对应位。
-{% endif %}
-
-{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
-**注意**: 该寄存器只能写入一次，之后写入会被忽略。
-{% endif %}
-
-{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
-**注意**: 该寄存器为脉冲类型，写入{% if reg.type == 'Write1Pulse' %}1{% else %}0{% endif %}会产生一个时钟周期的脉冲输出。
-{% endif %}
-
-{% elif register_fields is defined %}
+{% else %}
 *没有定义位域*
 {% endif %}
 
+{% if reg.type in ['Write1Clean', 'Write1Set'] %}
+**注意**: 写入1可{% if reg.type == 'Write1Clean' %}清零{% else %}置位{% endif %}对应位。
+
+{% elif reg.type in ['Write0Clean', 'Write0Set'] %}
+**注意**: 写入0可{% if reg.type == 'Write0Clean' %}清零{% else %}置位{% endif %}对应位。
+
+{% elif reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
+**注意**: 该寄存器只能写入一次，之后的写操作会被忽略。
+
+{% elif reg.type in ['ReadClean', 'WriteReadClean'] %}
+**注意**: 读取该寄存器后，寄存器值会自动清零。
+
+{% elif reg.type in ['ReadSet', 'WriteReadSet'] %}
+**注意**: 读取该寄存器后，寄存器值会自动置位。
+
+{% elif reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+**注意**: 写入{% if reg.type == 'Write1Pulse' %}1{% else %}0{% endif %}会产生脉冲信号，脉冲宽度为1个时钟周期。
+
+{% endif %}
+{% if reg.locked_by is defined and reg.locked_by|length > 0 %}
+**锁定依赖**: 当{% for locker in reg.locked_by %}{{ locker }}{% if not loop.last %} 或 {% endif %}{% endfor %}为1时，该寄存器被锁定，不可写入。
+
+{% endif %}
+{% if reg.magic_dependency is defined and reg.magic_dependency|length > 0 %}
+**魔术数字依赖**: 只有当{% for magic_dep in reg.magic_dependency %}{{ magic_dep }}等于特定值{% if not loop.last %} 且 {% endif %}{% endfor %}时，才能写入该寄存器。
+
+{% endif %}
 {% endfor %}
 
 ## 5. 编程指南
@@ -100,51 +132,73 @@ uint32_t read_reg(uint32_t addr) {
 
 // 使用示例
 void example() {
-{% if registers %}
 {% for reg in registers %}
-{% if reg.type != 'ReadOnly' and reg.type != 'Null' %}
+{% if reg.type not in ['ReadOnly'] %}
     // 写入 {{ reg.name }}
-    write_reg({{ module_name|upper }}_{{ reg.name|upper }}_ADDR, 0x12345678);
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, 0x12345678);
 {% endif %}
-{% if reg.type != 'WriteOnly' and reg.type != 'Null' %}
+{% if reg.type not in ['WriteOnly', 'WriteOnlyOnce'] %}
     // 读取 {{ reg.name }}
-    uint32_t {{ reg.name|lower }}_value = read_reg({{ module_name|upper }}_{{ reg.name|upper }}_ADDR);
+    uint32_t {{ reg.name|lower }}_value = read_reg({{ module_name|upper }}_{{ reg.name }}_ADDR);
 {% endif %}
 {% endfor %}
-{% endif %}
 }
 ```
 
-### 5.2 位域操作
+### 5.2 特殊寄存器操作示例
 
-{% if fields is defined and fields|length > 0 %}
+{% set special_regs = registers|selectattr("type", "in", ["Write1Clean", "Write1Set", "Write0Clean", "Write0Set", "WriteOnce", "WriteOnlyOnce", "ReadClean", "ReadSet", "WriteReadClean", "WriteReadSet", "Write1Pulse", "Write0Pulse"])|list %}
+{% if special_regs|length > 0 %}
 ```c
-void field_operations() {
-{% for field in fields %}
-{% if ':' in field.bit_range %}
-    // 设置 {{ field.register }} 的 {{ field.name }} 字段
-    uint32_t reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
-    reg_value = {{ module_name|upper }}_SET_{{ field.register }}_{{ field.name }}(reg_value, 0x{{ '%X' % (2**(field.width|int) - 1) }});
-    write_reg({{ module_name|upper }}_{{ field.register }}_ADDR, reg_value);
-    
-    // 读取 {{ field.register }} 的 {{ field.name }} 字段
-    reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
-    uint32_t field_value = {{ module_name|upper }}_GET_{{ field.register }}_{{ field.name }}(reg_value);
-{% else %}
-    // 设置 {{ field.register }} 的 {{ field.name }} 位
-    uint32_t reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
-    reg_value = {{ module_name|upper }}_SET_{{ field.register }}_{{ field.name }}(reg_value, 1);
-    write_reg({{ module_name|upper }}_{{ field.register }}_ADDR, reg_value);
-    
-    // 读取 {{ field.register }} 的 {{ field.name }} 位
-    reg_value = read_reg({{ module_name|upper }}_{{ field.register }}_ADDR);
-    uint8_t bit_value = {{ module_name|upper }}_GET_{{ field.register }}_{{ field.name }}(reg_value);
+void special_reg_operations() {
+{% for reg in special_regs %}
+    // {{ reg.type }} 类型寄存器 {{ reg.name }} 操作示例
+{% if reg.type == 'Write1Clean' %}
+    // 清除特定位
+    uint32_t clear_mask = 0x00000001; // 要清除的位
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, clear_mask);
+{% elif reg.type == 'Write1Set' %}
+    // 置位特定位
+    uint32_t set_mask = 0x00000001; // 要置位的位
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, set_mask);
+{% elif reg.type == 'Write0Clean' %}
+    // 清除特定位
+    uint32_t clear_mask = ~0x00000001; // 要清除的位（写0清零）
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, clear_mask);
+{% elif reg.type == 'Write0Set' %}
+    // 置位特定位
+    uint32_t set_mask = ~0x00000001; // 要置位的位（写0置位）
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, set_mask);
+{% elif reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
+    // 只能写一次的寄存器
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, 0x12345678);
+    // 此后的写操作将被忽略
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, 0x87654321); // 无效
+{% elif reg.type in ['ReadClean', 'WriteReadClean'] %}
+    // 读取后自动清零
+    uint32_t value = read_reg({{ module_name|upper }}_{{ reg.name }}_ADDR);
+    // 再次读取将返回0
+    uint32_t zero = read_reg({{ module_name|upper }}_{{ reg.name }}_ADDR);
+{% elif reg.type in ['ReadSet', 'WriteReadSet'] %}
+    // 读取后自动置位
+    uint32_t value = read_reg({{ module_name|upper }}_{{ reg.name }}_ADDR);
+    // 再次读取将返回全1
+    uint32_t all_ones = read_reg({{ module_name|upper }}_{{ reg.name }}_ADDR);
+{% elif reg.type == 'Write1Pulse' %}
+    // 写1产生脉冲
+    uint32_t pulse_mask = 0x00000001; // 要产生脉冲的位
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, pulse_mask);
+{% elif reg.type == 'Write0Pulse' %}
+    // 写0产生脉冲
+    uint32_t pulse_mask = ~0x00000001; // 要产生脉冲的位（写0产生脉冲）
+    write_reg({{ module_name|upper }}_{{ reg.name }}_ADDR, pulse_mask);
 {% endif %}
+
 {% endfor %}
 }
 ```
 {% else %}
-*没有定义位域操作*
+本寄存器文件中没有特殊类型的寄存器需要特殊操作。
 {% endif %}
 
 ## 6. 时序要求

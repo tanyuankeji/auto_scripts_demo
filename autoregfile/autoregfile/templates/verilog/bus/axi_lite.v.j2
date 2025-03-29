@@ -1,368 +1,317 @@
-{# AXI-Lite总线接口模板 #}
+{# AXI Lite总线接口模板 #}
+// =============================================================================
+// 自动生成的AXI Lite接口寄存器文件: {{ module_name }}
+// 
+// 生成时间: {{ generation_time }}
+// =============================================================================
+`timescale 1ns / 1ps
+
 module {{ module_name }} (
-    // 系统信号
-    input  wire                     clk,
-    input  wire                     rst_n,
+    // 时钟和复位
+    input  wire                      clk,
+    input  wire                      rst_n,
     
-    // AXI-Lite写地址通道
-    input  wire [{{ addr_width-1 }}:0]   s_axil_awaddr,
-    input  wire                     s_axil_awvalid,
-    output reg                      s_axil_awready,
+    // AXI Lite总线接口
+    // 写地址通道
+    input  wire [{{ addr_width-1 }}:0]  s_axil_awaddr,     // 写地址
+    input  wire                      s_axil_awvalid,    // 写地址有效
+    output wire                      s_axil_awready,    // 写地址就绪
+    // 写数据通道
+    input  wire [{{ data_width-1 }}:0]  s_axil_wdata,      // 写数据
+    input  wire [{{ (data_width/8)-1 }}:0]  s_axil_wstrb,      // 写数据选通
+    input  wire                      s_axil_wvalid,     // 写数据有效
+    output wire                      s_axil_wready,     // 写数据就绪
+    // 写响应通道
+    output wire [1:0]                s_axil_bresp,      // 写响应
+    output wire                      s_axil_bvalid,     // 写响应有效
+    input  wire                      s_axil_bready,     // 写响应就绪
+    // 读地址通道
+    input  wire [{{ addr_width-1 }}:0]  s_axil_araddr,     // 读地址
+    input  wire                      s_axil_arvalid,    // 读地址有效
+    output wire                      s_axil_arready,    // 读地址就绪
+    // 读数据通道
+    output wire [{{ data_width-1 }}:0]  s_axil_rdata,      // 读数据
+    output wire [1:0]                s_axil_rresp,      // 读响应
+    output wire                      s_axil_rvalid,     // 读数据有效
+    input  wire                      s_axil_rready,     // 读数据就绪
     
-    // AXI-Lite写数据通道
-    input  wire [{{ data_width-1 }}:0]   s_axil_wdata,
-    input  wire [{{ (data_width//8)-1 }}:0]  s_axil_wstrb,
-    input  wire                     s_axil_wvalid,
-    output reg                      s_axil_wready,
-    
-    // AXI-Lite写响应通道
-    output reg  [1:0]               s_axil_bresp,
-    output reg                      s_axil_bvalid,
-    input  wire                     s_axil_bready,
-    
-    // AXI-Lite读地址通道
-    input  wire [{{ addr_width-1 }}:0]   s_axil_araddr,
-    input  wire                     s_axil_arvalid,
-    output reg                      s_axil_arready,
-    
-    // AXI-Lite读数据通道
-    output reg  [{{ data_width-1 }}:0]   s_axil_rdata,
-    output reg  [1:0]               s_axil_rresp,
-    output reg                      s_axil_rvalid,
-    input  wire                     s_axil_rready
-{% if has_pulse_registers %}
-    ,
-    // 脉冲输出信号
-{% for reg in registers %}{% if reg.type == 'Write1Pulse' or reg.type == 'Write0Pulse' %}
-    output reg  [{{ data_width-1 }}:0]   {{ reg.name|lower }}_pulse{% if not loop.last %},{% endif %}
-{% endif %}{% endfor %}
-{% endif %}
-);
-
-    // AXI-Lite响应类型常量
-    localparam RESP_OKAY   = 2'b00;  // 成功
-    localparam RESP_EXOKAY = 2'b01;  // 排他访问成功
-    localparam RESP_SLVERR = 2'b10;  // 从设备错误
-    localparam RESP_DECERR = 2'b11;  // 解码错误
-
-    // 地址常量定义
+    // 寄存器接口信号
 {% for reg in registers %}
-    localparam ADDR_{{ reg.name|upper }} = {{ addr_width }}'h{{ '%X' % reg.address|int(0) }};
-{% endfor %}
-
-    // 寄存器定义
-{% for reg in registers %}
-    reg [{{ data_width-1 }}:0] {{ reg.name|lower }}_reg;
-{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
-    reg        {{ reg.name|lower }}_written;
+    // {{ reg.name }} - {{ reg.description|default('寄存器') }}
+{% if reg.type in ['ReadOnly', 'ReadWrite'] %}
+    output wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_o,  // 寄存器值输出
 {% endif %}
-{% endfor %}
-
-{% if has_locked_registers %}
-    // 锁定逻辑
-{% for reg in registers %}
-{% if reg.locked_by %}
-    wire       {{ reg.name|lower }}_locked = {% for locker in reg.locked_by %}{{ locker|lower }}_reg[0]{% if not loop.last %} || {% endif %}{% endfor %};
+{% if reg.type == 'ReadOnly' %}
+    input  wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_i,  // 硬件写入值
+    input  wire                      {{ reg.name|lower }}_wen,  // 硬件写使能
 {% endif %}
-{% endfor %}
+{% if reg.type in ['WriteOnly', 'ReadWrite', 'Write1Clean', 'Write0Clean', 'Write1Set', 'Write0Set', 'WriteOnce'] %}
+    input  wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_i,  // 硬件写入值
+    input  wire                      {{ reg.name|lower }}_wen,  // 硬件写使能
 {% endif %}
-
-    // 写操作相关状态
-    reg [{{ addr_width-1 }}:0] write_addr;
-    reg                     write_addr_valid;
-    reg [{{ data_width-1 }}:0] write_data;
-    reg [{{ (data_width//8)-1 }}:0] write_strb;
-    reg                     write_data_valid;
-    reg                     write_resp_pending;
-    
-    // 读操作相关状态
-    reg [{{ addr_width-1 }}:0] read_addr;
-    reg                     read_addr_valid;
-    reg                     read_resp_pending;
-    
-    // 写地址通道处理
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s_axil_awready <= 1'b1;
-            write_addr <= {{ addr_width }}'d0;
-            write_addr_valid <= 1'b0;
-        end 
-        else begin
-            // 如果总线提供了有效的写地址，且从设备准备好接收
-            if (s_axil_awvalid && s_axil_awready) begin
-                write_addr <= s_axil_awaddr;
-                write_addr_valid <= 1'b1;
-                s_axil_awready <= 1'b0;  // 表示已接收地址
-            end
-            // 如果写响应已完成，准备接收新的地址
-            else if (s_axil_bvalid && s_axil_bready) begin
-                write_addr_valid <= 1'b0;
-                s_axil_awready <= 1'b1;
-            end
-        end
-    end
-    
-    // 写数据通道处理
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s_axil_wready <= 1'b1;
-            write_data <= {{ data_width }}'d0;
-            write_strb <= {{ (data_width//8) }}'d0;
-            write_data_valid <= 1'b0;
-        end 
-        else begin
-            // 如果总线提供了有效的写数据，且从设备准备好接收
-            if (s_axil_wvalid && s_axil_wready) begin
-                write_data <= s_axil_wdata;
-                write_strb <= s_axil_wstrb;
-                write_data_valid <= 1'b1;
-                s_axil_wready <= 1'b0;  // 表示已接收数据
-            end
-            // 如果写响应已完成，准备接收新的数据
-            else if (s_axil_bvalid && s_axil_bready) begin
-                write_data_valid <= 1'b0;
-                s_axil_wready <= 1'b1;
-            end
-        end
-    end
-    
-    // 写响应通道处理
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s_axil_bvalid <= 1'b0;
-            s_axil_bresp <= RESP_OKAY;
-            write_resp_pending <= 1'b0;
-        end 
-        else begin
-            // 如果同时收到了有效的地址和数据，准备发送响应
-            if (write_addr_valid && write_data_valid && !write_resp_pending) begin
-                s_axil_bvalid <= 1'b1;
-                s_axil_bresp <= RESP_OKAY;  // 假设所有写操作都成功
-                write_resp_pending <= 1'b1;
-            end
-            // 如果主设备已接收到响应，清除响应状态
-            else if (s_axil_bvalid && s_axil_bready) begin
-                s_axil_bvalid <= 1'b0;
-                write_resp_pending <= 1'b0;
-            end
-        end
-    end
-    
-    // 读地址通道处理
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s_axil_arready <= 1'b1;
-            read_addr <= {{ addr_width }}'d0;
-            read_addr_valid <= 1'b0;
-        end 
-        else begin
-            // 如果总线提供了有效的读地址，且从设备准备好接收
-            if (s_axil_arvalid && s_axil_arready) begin
-                read_addr <= s_axil_araddr;
-                read_addr_valid <= 1'b1;
-                s_axil_arready <= 1'b0;  // 表示已接收地址
-            end
-            // 如果读响应已完成，准备接收新的地址
-            else if (s_axil_rvalid && s_axil_rready) begin
-                read_addr_valid <= 1'b0;
-                s_axil_arready <= 1'b1;
-            end
-        end
-    end
-    
-    // 读数据通道处理
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s_axil_rvalid <= 1'b0;
-            s_axil_rresp <= RESP_OKAY;
-            s_axil_rdata <= {{ data_width }}'d0;
-            read_resp_pending <= 1'b0;
-        end 
-        else begin
-            // 如果收到了有效的读地址，准备发送数据
-            if (read_addr_valid && !read_resp_pending) begin
-                s_axil_rvalid <= 1'b1;
-                s_axil_rresp <= RESP_OKAY;  // 假设所有读操作都成功
-                
-                // 根据地址选择相应的寄存器值
-                case (read_addr)
-{% for reg in registers %}
-{% if reg.type in ['WriteOnly', 'WriteOnlyClean', 'WriteOnlySet', 'WriteOnlyOnce'] %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是只写寄存器，读取返回0
-                        s_axil_rdata <= {{ data_width }}'d0;
-                    end
-{% else %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是可读寄存器
-                        s_axil_rdata <= {{ reg.name|lower }}_reg;
-                    end
-{% endif %}
-{% endfor %}
-                    default: begin
-                        // 未知地址，返回0
-                        s_axil_rdata <= {{ data_width }}'d0;
-                        s_axil_rresp <= RESP_DECERR;  // 解码错误
-                    end
-                endcase
-                
-                read_resp_pending <= 1'b1;
-            end
-            // 如果主设备已接收到数据，清除响应状态
-            else if (s_axil_rvalid && s_axil_rready) begin
-                s_axil_rvalid <= 1'b0;
-                read_resp_pending <= 1'b0;
-            end
-        end
-    end
-    
-    // 寄存器写逻辑
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            // 复位所有寄存器
-{% for reg in registers %}
-            {{ reg.name|lower }}_reg <= {{ data_width }}'{{ 'h' if reg.reset_value|string|startswith('0x') else 'd' }}{{ reg.reset_value|string|replace('0x', '') }};
-{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
-            {{ reg.name|lower }}_written <= 1'b0;
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+    output wire                      {{ reg.name|lower }}_read,  // 读取信号
 {% endif %}
 {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
-            {{ reg.name|lower }}_pulse <= {{ data_width }}'d0;
+    output wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_pulse,  // 脉冲输出
 {% endif %}
 {% endfor %}
-        end
-        else begin
-            // 默认清零脉冲信号
-{% for reg in registers %}{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
-            {{ reg.name|lower }}_pulse <= {{ data_width }}'d0;
-{% endif %}{% endfor %}
-            
-            // 处理写操作
-            if (write_addr_valid && write_data_valid && !write_resp_pending) begin
-                case (write_addr)
+
+    // 测试和调试接口
+    input  wire                      test_mode
+);
+
+// ===========================================================================
+// 内部信号定义
+// ===========================================================================
+// AXI Lite 写通道状态机
+localparam WRIDLE = 2'd0;
+localparam WRDATA = 2'd1;
+localparam WRRESP = 2'd2;
+
+reg [1:0] wstate_cs, wstate_ns;
+reg [{{ addr_width-1 }}:0] waddr;
+wire [{{ addr_width-1 }}:0] wmask;
+
+// AXI Lite 读通道状态机
+localparam RDIDLE = 2'd0;
+localparam RDDATA = 2'd1;
+
+reg [1:0] rstate_cs, rstate_ns;
+reg [{{ data_width-1 }}:0] rdata;
+reg [{{ addr_width-1 }}:0] raddr;
+
+// AXI Lite信号路由
+assign s_axil_awready = (wstate_cs == WRIDLE);
+assign s_axil_wready  = (wstate_cs == WRDATA);
+assign s_axil_bresp   = 2'b00;  // OKAY
+assign s_axil_bvalid  = (wstate_cs == WRRESP);
+assign s_axil_arready = (rstate_cs == RDIDLE);
+assign s_axil_rdata   = rdata;
+assign s_axil_rresp   = 2'b00;  // OKAY
+assign s_axil_rvalid  = (rstate_cs == RDDATA);
+
+// 地址掩码生成
+assign wmask = {
+    {8{s_axil_wstrb[3]}}, 
+    {8{s_axil_wstrb[2]}}, 
+    {8{s_axil_wstrb[1]}}, 
+    {8{s_axil_wstrb[0]}}
+};
+
+// 地址解码信号
 {% for reg in registers %}
-{% if reg.type == 'ReadOnly' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是只读寄存器，忽略写操作
-                    end
-{% elif reg.type == 'WriteOnce' or reg.type == 'WriteOnlyOnce' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是只写一次寄存器
-                        if (!{{ reg.name|lower }}_written) begin
-                            // 应用写屏蔽
-                            for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                                if (write_strb[i]) begin
-                                    {{ reg.name|lower }}_reg[i*8 +: 8] <= write_data[i*8 +: 8];
-                                end
-                            end
-                            {{ reg.name|lower }}_written <= 1'b1;
-                        end
-                    end
-{% elif reg.type == 'Write1Clean' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写1清零寄存器
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_reg[i*8 +: 8] <= {{ reg.name|lower }}_reg[i*8 +: 8] & ~write_data[i*8 +: 8];
-                            end
-                        end
-                    end
-{% elif reg.type == 'Write1Set' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写1置位寄存器
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_reg[i*8 +: 8] <= {{ reg.name|lower }}_reg[i*8 +: 8] | write_data[i*8 +: 8];
-                            end
-                        end
-                    end
-{% elif reg.type == 'Write0Clean' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写0清零寄存器
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_reg[i*8 +: 8] <= {{ reg.name|lower }}_reg[i*8 +: 8] & write_data[i*8 +: 8];
-                            end
-                        end
-                    end
-{% elif reg.type == 'Write0Set' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写0置位寄存器
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_reg[i*8 +: 8] <= {{ reg.name|lower }}_reg[i*8 +: 8] | ~write_data[i*8 +: 8];
-                            end
-                        end
-                    end
-{% elif reg.type == 'Write1Pulse' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写1产生脉冲寄存器
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_pulse[i*8 +: 8] <= write_data[i*8 +: 8];
-                            end
-                        end
-                        {{ reg.name|lower }}_reg <= {{ data_width }}'d0;
-                    end
-{% elif reg.type == 'Write0Pulse' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写0产生脉冲寄存器
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_pulse[i*8 +: 8] <= ~write_data[i*8 +: 8];
-                            end
-                        end
-                        {{ reg.name|lower }}_reg <= {{ data_width }}'d0;
-                    end
-{% else %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是{{ reg.type }}类型寄存器
-{% if reg.locked_by %}
-                        if (!{{ reg.name|lower }}_locked) begin
-                            // 应用写屏蔽
-                            for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                                if (write_strb[i]) begin
-                                    {{ reg.name|lower }}_reg[i*8 +: 8] <= write_data[i*8 +: 8];
-                                end
-                            end
-                        end
-{% else %}
-                        // 应用写屏蔽
-                        for (int i = 0; i < {{ data_width//8 }}; i = i + 1) begin
-                            if (write_strb[i]) begin
-                                {{ reg.name|lower }}_reg[i*8 +: 8] <= write_data[i*8 +: 8];
-                            end
-                        end
-{% endif %}
-                    end
-{% endif %}
+wire sel_{{ reg.name|lower }} = (waddr[{{ addr_width-1 }}:2] == {{ (addr_width-2) }}'h{{ '%X' % (reg.address >> 2) if reg.address is number else '(%s >> 2)' % reg.address|replace('0x', '')|replace('0h', '') }});
+wire rsel_{{ reg.name|lower }} = (raddr[{{ addr_width-1 }}:2] == {{ (addr_width-2) }}'h{{ '%X' % (reg.address >> 2) if reg.address is number else '(%s >> 2)' % reg.address|replace('0x', '')|replace('0h', '') }});
 {% endfor %}
-                    default: begin
-                        // 未知地址，不做任何操作
-                    end
-                endcase
-            end
-            
-            // 读操作触发的特殊逻辑
+
+// 读取信号生成 - 用于ReadClean和ReadSet类型
 {% for reg in registers %}
-{% if reg.type in ['ReadClean', 'WriteReadClean'] %}
-            // 如果读取了{{ reg.name }}，则清零（{{ reg.type }}类型）
-            if (read_addr_valid && read_addr == ADDR_{{ reg.name|upper }} && s_axil_rvalid && s_axil_rready) begin
-                {{ reg.name|lower }}_reg <= {{ data_width }}'d0;
-            end
-{% elif reg.type in ['ReadSet', 'WriteReadSet'] %}
-            // 如果读取了{{ reg.name }}，则置位（{{ reg.type }}类型）
-            if (read_addr_valid && read_addr == ADDR_{{ reg.name|upper }} && s_axil_rvalid && s_axil_rready) begin
-                {{ reg.name|lower }}_reg <= {{ data_width }}'hFFFFFFFF;
-            end
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+reg {{ reg.name|lower }}_read_reg;
+assign {{ reg.name|lower }}_read = {{ reg.name|lower }}_read_reg;
 {% endif %}
 {% endfor %}
+
+// 寄存器定义
+{% for reg in registers %}
+reg [{{ data_width-1 }}:0] {{ reg.name|lower }}_reg;  // {{ reg.description|default('寄存器') }}
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+reg [{{ data_width-1 }}:0] {{ reg.name|lower }}_pulse_reg;  // 脉冲寄存器
+{% endif %}
+{% if reg.type == 'WriteOnce' %}
+reg {{ reg.name|lower }}_written;  // 写入状态标志
+{% endif %}
+{% endfor %}
+
+// ===========================================================================
+// AXI Lite写通道状态机
+// ===========================================================================
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        wstate_cs <= WRIDLE;
+    else
+        wstate_cs <= wstate_ns;
+end
+
+always @(*) begin
+    case (wstate_cs)
+        WRIDLE:
+            if (s_axil_awvalid)
+                wstate_ns = WRDATA;
+            else
+                wstate_ns = WRIDLE;
+        WRDATA:
+            if (s_axil_wvalid)
+                wstate_ns = WRRESP;
+            else
+                wstate_ns = WRDATA;
+        WRRESP:
+            if (s_axil_bready)
+                wstate_ns = WRIDLE;
+            else
+                wstate_ns = WRRESP;
+        default:
+            wstate_ns = WRIDLE;
+    endcase
+end
+
+// 写地址缓存
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        waddr <= {{addr_width}}'b0;
+    else if (s_axil_awvalid && s_axil_awready)
+        waddr <= s_axil_awaddr;
+end
+
+// ===========================================================================
+// AXI Lite读通道状态机
+// ===========================================================================
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        rstate_cs <= RDIDLE;
+    else
+        rstate_cs <= rstate_ns;
+end
+
+always @(*) begin
+    case (rstate_cs)
+        RDIDLE:
+            if (s_axil_arvalid)
+                rstate_ns = RDDATA;
+            else
+                rstate_ns = RDIDLE;
+        RDDATA:
+            if (s_axil_rready)
+                rstate_ns = RDIDLE;
+            else
+                rstate_ns = RDDATA;
+        default:
+            rstate_ns = RDIDLE;
+    endcase
+end
+
+// 读地址缓存
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        raddr <= {{addr_width}}'b0;
+    else if (s_axil_arvalid && s_axil_arready)
+        raddr <= s_axil_araddr;
+end
+
+// 读数据多路复用
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        rdata <= {{data_width}}'b0;
+    else if (s_axil_arvalid && s_axil_arready) begin
+        // 准备读数据
+{% for reg in registers %}
+{% if reg.type not in ['WriteOnly'] %}
+        if (rsel_{{ reg.name|lower }}) begin
+            rdata <= {{ reg.name|lower }}_reg;
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+            {{ reg.name|lower }}_read_reg <= 1'b1;  // 设置读取事件
+{% endif %}
         end
+{% endif %}
+{% endfor %}
     end
+end
+
+// ===========================================================================
+// 寄存器输出信号连接
+// ===========================================================================
+{% for reg in registers %}
+{% if reg.type in ['ReadOnly', 'ReadWrite'] %}
+assign {{ reg.name|lower }}_o = {{ reg.name|lower }}_reg;
+{% endif %}
+
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+assign {{ reg.name|lower }}_pulse = {{ reg.name|lower }}_pulse_reg;
+{% endif %}
+{% endfor %}
+
+// ===========================================================================
+// 寄存器写入逻辑
+// ===========================================================================
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        // 复位所有寄存器到默认值
+{% for reg in registers %}
+        {{ reg.name|lower }}_reg <= {{ data_width }}'h{{ '%X' % reg.reset_value if reg.reset_value is number else reg.reset_value|default('0')|replace('0x', '')|replace('0h', '') }};
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+        {{ reg.name|lower }}_pulse_reg <= {{ data_width }}'h0;
+{% endif %}
+{% if reg.type == 'WriteOnce' %}
+        {{ reg.name|lower }}_written <= 1'b0;
+{% endif %}
+{% endfor %}
+    end
+    else begin
+        // 默认清零脉冲寄存器
+{% for reg in registers %}
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+        {{ reg.name|lower }}_pulse_reg <= {{ data_width }}'h0;
+{% endif %}
+{% endfor %}
+
+        // 处理读后自动置位或清零的寄存器
+{% for reg in registers %}
+{% if reg.type == 'ReadClean' %}
+        if ({{ reg.name|lower }}_read_reg) begin
+            {{ reg.name|lower }}_reg <= {{ data_width }}'h0;  // 读后清零
+            {{ reg.name|lower }}_read_reg <= 1'b0;  // 清除读取事件标志
+        end
+{% elif reg.type == 'ReadSet' %}
+        if ({{ reg.name|lower }}_read_reg) begin
+            {{ reg.name|lower }}_reg <= {{ data_width }}'hFFFFFFFF;  // 读后置位
+            {{ reg.name|lower }}_read_reg <= 1'b0;  // 清除读取事件标志
+        end
+{% endif %}
+{% endfor %}
+
+        // AXI Lite总线写入（软件写入）
+        if (s_axil_wvalid && s_axil_wready) begin
+{% for reg in registers %}
+{% if reg.type not in ['ReadOnly'] %}
+            if (sel_{{ reg.name|lower }}) begin
+{% if reg.type == 'ReadWrite' or reg.type == 'WriteOnly' %}
+                {{ reg.name|lower }}_reg <= ({{ reg.name|lower }}_reg & ~wmask) | (s_axil_wdata & wmask);  // 字节选通写入
+{% elif reg.type == 'Write1Clean' or reg.type == 'Write1Clear' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~(s_axil_wdata & wmask);  // 写1清零
+{% elif reg.type == 'Write0Clean' or reg.type == 'Write0Clear' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & (s_axil_wdata | ~wmask);  // 写0清零
+{% elif reg.type == 'Write1Set' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | (s_axil_wdata & wmask);  // 写1置位
+{% elif reg.type == 'Write0Set' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | (~s_axil_wdata & wmask);  // 写0置位
+{% elif reg.type == 'Write1Pulse' %}
+                {{ reg.name|lower }}_pulse_reg <= s_axil_wdata & wmask;  // 写1产生脉冲
+{% elif reg.type == 'Write0Pulse' %}
+                {{ reg.name|lower }}_pulse_reg <= ~s_axil_wdata & wmask;  // 写0产生脉冲
+{% elif reg.type == 'WriteOnce' %}
+                if (!{{ reg.name|lower }}_written) begin  // 仅允许写一次
+                    {{ reg.name|lower }}_reg <= ({{ reg.name|lower }}_reg & ~wmask) | (s_axil_wdata & wmask);
+                    {{ reg.name|lower }}_written <= 1'b1;  // 设置写入标志
+                end
+{% endif %}
+            end
+{% endif %}
+{% endfor %}
+        end
+
+        // 硬件接口写入 - 通常优先级高于软件写入
+{% for reg in registers %}
+{% if reg.type in ['ReadOnly', 'ReadWrite', 'WriteOnly', 'Write1Clean', 'Write0Clean', 'Write1Set', 'Write0Set', 'WriteOnce'] %}
+        if ({{ reg.name|lower }}_wen) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_i;
+{% if reg.type == 'WriteOnce' %}
+            {{ reg.name|lower }}_written <= 1'b1;  // 设置写入标志
+{% endif %}
+        end
+{% endif %}
+{% endfor %}
+    end
+end
 
 endmodule 

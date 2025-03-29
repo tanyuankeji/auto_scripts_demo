@@ -1,188 +1,218 @@
 {# APB总线接口模板 #}
+// =============================================================================
+// 自动生成的APB接口寄存器文件: {{ module_name }}
+// 
+// 生成时间: {{ generation_time }}
+// =============================================================================
+`timescale 1ns / 1ps
+
 module {{ module_name }} (
-    // 系统信号
-    input  wire                     clk,
-    input  wire                     rst_n,
+    // 时钟和复位
+    input  wire                      clk,
+    input  wire                      rst_n,
     
     // APB总线接口
-    input  wire [{{ addr_width-1 }}:0]   paddr,
-    input  wire                     psel,
-    input  wire                     penable,
-    input  wire                     pwrite,
-    input  wire [{{ data_width-1 }}:0]   pwdata,
-    output reg  [{{ data_width-1 }}:0]   prdata,
-    output wire                     pready,
-    output wire                     pslverr
-{% if has_pulse_registers %}
-    ,
-    // 脉冲输出信号
-{% for reg in registers %}{% if reg.type == 'Write1Pulse' or reg.type == 'Write0Pulse' %}
-    output reg  [{{ data_width-1 }}:0]   {{ reg.name|lower }}_pulse{% if not loop.last %},{% endif %}
-{% endif %}{% endfor %}
-{% endif %}
-);
-
-    // 地址常量定义
-{% for reg in registers %}
-    localparam ADDR_{{ reg.name|upper }} = {{ addr_width }}'h{{ '%X' % reg.address|int(0) }};
-{% endfor %}
-
-    // 寄存器定义
-{% for reg in registers %}
-    reg [{{ data_width-1 }}:0] {{ reg.name|lower }}_reg;
-{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
-    reg        {{ reg.name|lower }}_written;
-{% endif %}
-{% endfor %}
-
-{% if has_locked_registers %}
-    // 锁定逻辑
-{% for reg in registers %}
-{% if reg.locked_by %}
-    wire       {{ reg.name|lower }}_locked = {% for locker in reg.locked_by %}{{ locker|lower }}_reg[0]{% if not loop.last %} || {% endif %}{% endfor %};
-{% endif %}
-{% endfor %}
-{% endif %}
-
-    // APB总线控制信号
-    wire apb_write = psel && penable && pwrite;
-    wire apb_read  = psel && !pwrite;
+    input  wire [{{ addr_width-1 }}:0]  paddr,
+    input  wire                      psel,
+    input  wire                      penable,
+    input  wire                      pwrite,
+    input  wire [{{ data_width-1 }}:0]  pwdata,
+    output wire [{{ data_width-1 }}:0]  prdata,
+    output wire                      pready,
+    output wire                      pslverr,
     
-    // APB总线就绪信号 - 本设计总是准备好
-    assign pready  = 1'b1;
-    
-    // APB总线错误信号 - 本设计不产生错误
-    assign pslverr = 1'b0;
-    
-    // 寄存器写逻辑
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            // 复位所有寄存器
+    // 寄存器接口信号
 {% for reg in registers %}
-            {{ reg.name|lower }}_reg <= {{ data_width }}'{{ 'h' if reg.reset_value|string|startswith('0x') else 'd' }}{{ reg.reset_value|string|replace('0x', '') }};
-{% if reg.type in ['WriteOnce', 'WriteOnlyOnce'] %}
-            {{ reg.name|lower }}_written <= 1'b0;
+    // {{ reg.name }} - {{ reg.description|default('寄存器') }}
+{% if reg.type in ['ReadOnly', 'ReadWrite'] %}
+    output wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_o,  // 寄存器值输出
+{% endif %}
+{% if reg.type == 'ReadOnly' %}
+    input  wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_i,  // 硬件写入值
+    input  wire                      {{ reg.name|lower }}_wen,  // 硬件写使能
+{% endif %}
+{% if reg.type in ['WriteOnly', 'ReadWrite', 'Write1Clean', 'Write0Clean', 'Write1Set', 'Write0Set', 'WriteOnce'] %}
+    input  wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_i,  // 硬件写入值
+    input  wire                      {{ reg.name|lower }}_wen,  // 硬件写使能
+{% endif %}
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+    output wire                      {{ reg.name|lower }}_read,  // 读取信号
 {% endif %}
 {% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
-            {{ reg.name|lower }}_pulse <= {{ data_width }}'d0;
+    output wire [{{ data_width-1 }}:0] {{ reg.name|lower }}_pulse,  // 脉冲输出
 {% endif %}
 {% endfor %}
-        end
-        else begin
-            // 默认清零脉冲信号
-{% for reg in registers %}{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
-            {{ reg.name|lower }}_pulse <= {{ data_width }}'d0;
-{% endif %}{% endfor %}
-            
-            // 写逻辑
-            if (apb_write) begin
-                case (paddr)
+
+    // 测试和调试接口
+    input  wire                      test_mode
+);
+
+// ===========================================================================
+// 内部信号定义
+// ===========================================================================
+
+// APB总线控制信号 - 符合APB协议的写读使能信号
+// 根据APB协议，写操作在 psel=1 && penable=1 && pwrite=1 时有效
+wire apb_write = psel && penable && pwrite;
+// 根据APB协议，读操作在 psel=1 && pwrite=0 时开始，读数据在 penable=1 时有效
+wire apb_read_setup = psel && !pwrite;
+wire apb_read  = psel && penable && !pwrite;
+
+// APB总线就绪信号 - 本设计总是准备好
+assign pready  = 1'b1;
+
+// APB总线错误信号 - 本设计不产生错误
+assign pslverr = 1'b0;
+
+// 地址解码信号
 {% for reg in registers %}
-{% if reg.type == 'ReadOnly' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是只读寄存器，忽略写操作
-                    end
-{% elif reg.type == 'WriteOnce' or reg.type == 'WriteOnlyOnce' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是只写一次寄存器
-                        if (!{{ reg.name|lower }}_written) begin
-                            {{ reg.name|lower }}_reg <= pwdata;
-                            {{ reg.name|lower }}_written <= 1'b1;
-                        end
-                    end
-{% elif reg.type == 'Write1Clean' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写1清零寄存器
-                        {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~pwdata;
-                    end
-{% elif reg.type == 'Write1Set' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写1置位寄存器
-                        {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | pwdata;
-                    end
-{% elif reg.type == 'Write0Clean' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写0清零寄存器
-                        {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & pwdata;
-                    end
-{% elif reg.type == 'Write0Set' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写0置位寄存器
-                        {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | ~pwdata;
-                    end
-{% elif reg.type == 'Write1Pulse' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写1产生脉冲寄存器
-                        {{ reg.name|lower }}_pulse <= pwdata;
-                        {{ reg.name|lower }}_reg <= {{ data_width }}'d0;
-                    end
-{% elif reg.type == 'Write0Pulse' %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是写0产生脉冲寄存器
-                        {{ reg.name|lower }}_pulse <= ~pwdata;
-                        {{ reg.name|lower }}_reg <= {{ data_width }}'d0;
-                    end
-{% else %}
-                    ADDR_{{ reg.name|upper }}: begin
-                        // {{ reg.name }} 是{{ reg.type }}类型寄存器
-{% if reg.locked_by %}
-                        if (!{{ reg.name|lower }}_locked) begin
-                            {{ reg.name|lower }}_reg <= pwdata;
-                        end
-{% else %}
-                        {{ reg.name|lower }}_reg <= pwdata;
-{% endif %}
-                    end
-{% endif %}
+wire sel_{{ reg.name|lower }} = (paddr == {{ addr_width }}'h{{ '%X' % reg.address if reg.address is number else reg.address|replace('0x', '')|replace('0h', '') }});
 {% endfor %}
-                    default: begin
-                        // 未知地址，不做任何操作
-                    end
-                endcase
-            end
-            
-            // 读操作触发的特殊逻辑
+
+// 读取信号生成 - 用于ReadClean和ReadSet类型
 {% for reg in registers %}
-{% if reg.type in ['ReadClean', 'WriteReadClean'] %}
-            // 如果读取了{{ reg.name }}，则清零（{{ reg.type }}类型）
-            if (apb_read && paddr == ADDR_{{ reg.name|upper }}) begin
-                {{ reg.name|lower }}_reg <= {{ data_width }}'d0;
-            end
-{% elif reg.type in ['ReadSet', 'WriteReadSet'] %}
-            // 如果读取了{{ reg.name }}，则置位（{{ reg.type }}类型）
-            if (apb_read && paddr == ADDR_{{ reg.name|upper }}) begin
-                {{ reg.name|lower }}_reg <= {{ data_width }}'hFFFFFFFF;
-            end
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+reg {{ reg.name|lower }}_read_reg;
+assign {{ reg.name|lower }}_read = {{ reg.name|lower }}_read_reg;
 {% endif %}
 {% endfor %}
-        end
-    end
+
+// 寄存器定义
+{% for reg in registers %}
+reg [{{ data_width-1 }}:0] {{ reg.name|lower }}_reg;  // {{ reg.description|default('寄存器') }}
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+reg [{{ data_width-1 }}:0] {{ reg.name|lower }}_pulse_reg;  // 脉冲寄存器
+{% endif %}
+{% if reg.type == 'WriteOnce' %}
+reg {{ reg.name|lower }}_written;  // 写入状态标志
+{% endif %}
+{% endfor %}
+
+// 读数据选择
+reg [{{ data_width-1 }}:0] prdata_reg;
+assign prdata = prdata_reg;
+
+// ===========================================================================
+// 寄存器读取逻辑
+// ===========================================================================
+always @(*) begin
+    prdata_reg = {{ data_width }}'d0;  // 默认返回全0
     
-    // 寄存器读逻辑
-    always @(*) begin
-        prdata = {{ data_width }}'d0; // 默认值
-        
-        if (apb_read) begin
-            case (paddr)
+    // 清除所有读事件信号
 {% for reg in registers %}
-{% if reg.type in ['WriteOnly', 'WriteOnlyClean', 'WriteOnlySet', 'WriteOnlyOnce'] %}
-                ADDR_{{ reg.name|upper }}: begin
-                    // {{ reg.name }} 是只写寄存器，读取返回0
-                    prdata = {{ data_width }}'d0;
-                end
-{% else %}
-                ADDR_{{ reg.name|upper }}: begin
-                    // {{ reg.name }} 是可读寄存器
-                    prdata = {{ reg.name|lower }}_reg;
-                end
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+    {{ reg.name|lower }}_read_reg = 1'b0;
 {% endif %}
 {% endfor %}
-                default: begin
-                    // 未知地址，返回0
-                    prdata = {{ data_width }}'d0;
-                end
-            endcase
+    
+    if (apb_read_setup) begin
+{% for reg in registers %}
+{% if reg.type not in ['WriteOnly'] %}
+        if (sel_{{ reg.name|lower }}) begin
+            prdata_reg = {{ reg.name|lower }}_reg;
+{% if reg.type in ['ReadClean', 'ReadSet'] %}
+            {{ reg.name|lower }}_read_reg = 1'b1;  // 设置读取事件
+{% endif %}
         end
+{% endif %}
+{% endfor %}
     end
+end
+
+// ===========================================================================
+// 寄存器输出信号连接
+// ===========================================================================
+{% for reg in registers %}
+{% if reg.type in ['ReadOnly', 'ReadWrite'] %}
+assign {{ reg.name|lower }}_o = {{ reg.name|lower }}_reg;
+{% endif %}
+
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+assign {{ reg.name|lower }}_pulse = {{ reg.name|lower }}_pulse_reg;
+{% endif %}
+{% endfor %}
+
+// ===========================================================================
+// 寄存器写入逻辑
+// ===========================================================================
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        // 复位所有寄存器到默认值
+{% for reg in registers %}
+        {{ reg.name|lower }}_reg <= {{ data_width }}'h{{ '%X' % reg.reset_value if reg.reset_value is number else reg.reset_value|default('0')|replace('0x', '')|replace('0h', '') }};
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+        {{ reg.name|lower }}_pulse_reg <= {{ data_width }}'h0;
+{% endif %}
+{% if reg.type == 'WriteOnce' %}
+        {{ reg.name|lower }}_written <= 1'b0;
+{% endif %}
+{% endfor %}
+    end
+    else begin
+        // 默认清零脉冲寄存器
+{% for reg in registers %}
+{% if reg.type in ['Write1Pulse', 'Write0Pulse'] %}
+        {{ reg.name|lower }}_pulse_reg <= {{ data_width }}'h0;
+{% endif %}
+{% endfor %}
+
+        // 处理读后自动置位或清零的寄存器
+{% for reg in registers %}
+{% if reg.type == 'ReadClean' %}
+        if ({{ reg.name|lower }}_read_reg) begin
+            {{ reg.name|lower }}_reg <= {{ data_width }}'h0;  // 读后清零
+        end
+{% elif reg.type == 'ReadSet' %}
+        if ({{ reg.name|lower }}_read_reg) begin
+            {{ reg.name|lower }}_reg <= {{ data_width }}'hFFFFFFFF;  // 读后置位
+        end
+{% endif %}
+{% endfor %}
+
+        // APB总线写入（软件写入）
+        if (apb_write) begin
+{% for reg in registers %}
+{% if reg.type not in ['ReadOnly'] %}
+            if (sel_{{ reg.name|lower }}) begin
+{% if reg.type == 'ReadWrite' %}
+                {{ reg.name|lower }}_reg <= pwdata;
+{% elif reg.type == 'WriteOnly' %}
+                {{ reg.name|lower }}_reg <= pwdata;
+{% elif reg.type == 'Write1Clean' or reg.type == 'Write1Clear' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~pwdata;  // 写1清零
+{% elif reg.type == 'Write0Clean' or reg.type == 'Write0Clear' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & pwdata;  // 写0清零
+{% elif reg.type == 'Write1Set' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | pwdata;  // 写1置位
+{% elif reg.type == 'Write0Set' %}
+                {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | ~pwdata;  // 写0置位
+{% elif reg.type == 'Write1Pulse' %}
+                {{ reg.name|lower }}_pulse_reg <= pwdata;  // 写1产生脉冲
+{% elif reg.type == 'Write0Pulse' %}
+                {{ reg.name|lower }}_pulse_reg <= ~pwdata;  // 写0产生脉冲
+{% elif reg.type == 'WriteOnce' %}
+                if (!{{ reg.name|lower }}_written) begin  // 仅允许写一次
+                    {{ reg.name|lower }}_reg <= pwdata;
+                    {{ reg.name|lower }}_written <= 1'b1;  // 设置写入标志
+                end
+{% endif %}
+            end
+{% endif %}
+{% endfor %}
+        end
+
+        // 硬件接口写入 - 通常优先级高于软件写入
+{% for reg in registers %}
+{% if reg.type in ['ReadOnly', 'ReadWrite', 'WriteOnly', 'Write1Clean', 'Write0Clean', 'Write1Set', 'Write0Set', 'WriteOnce'] %}
+        if ({{ reg.name|lower }}_wen) begin
+            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_i;
+{% if reg.type == 'WriteOnce' %}
+            {{ reg.name|lower }}_written <= 1'b1;  // 设置写入标志
+{% endif %}
+        end
+{% endif %}
+{% endfor %}
+    end
+end
 
 endmodule 
