@@ -66,7 +66,8 @@ class RegisterFactory:
             self.logger.warning(f"模板目录不存在: {template_dir}")
     
     def generate_regfile(self, config_file: str, output_file: str, 
-                       bus_protocol: Optional[str] = None) -> bool:
+                       bus_protocol: Optional[str] = None, 
+                       enable_debug_info: bool = False) -> bool:
         """
         生成寄存器文件
         
@@ -74,6 +75,7 @@ class RegisterFactory:
             config_file: 配置文件路径
             output_file: 输出文件路径
             bus_protocol: 总线协议，None表示使用配置文件中指定的协议
+            enable_debug_info: 是否在生成的寄存器文件中包含调试信息
             
         Returns:
             bool: 是否成功生成
@@ -92,6 +94,9 @@ class RegisterFactory:
             if bus_protocol:
                 config["bus_protocol"] = bus_protocol
             
+            # 设置调试信息选项
+            config["enable_debug_info"] = enable_debug_info
+            
             # 获取总线协议
             protocol = config.get("bus_protocol", "custom")
             self.logger.info(f"使用总线协议: {protocol}")
@@ -106,7 +111,7 @@ class RegisterFactory:
                 return False
             
             # 生成寄存器文件
-            success = generator.generate(output_file)
+            success = generator.generate(output_file, enable_debug_info=enable_debug_info)
             
             if success:
                 elapsed_time = time.time() - start_time

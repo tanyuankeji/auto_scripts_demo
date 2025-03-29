@@ -163,3 +163,174 @@ write_register(CTRL_REG, 0x00000001);  // 写入START位
 1. 使用`examples/test_magic_number.py`脚本测试魔术数字依赖功能
 2. 检查生成的Verilog代码中是否包含正确的锁定和魔术数字验证逻辑
 3. 使用仿真工具验证锁定和魔术数字功能是否按预期工作 
+
+# 命令行参数详解
+
+AutoRegFile提供了丰富的命令行参数，用于控制寄存器文件的生成过程。以下是完整的参数列表及其说明：
+
+| 参数 | 简写 | 说明 |
+|-----|-----|-----|
+| `--config` | `-c` | 配置文件路径（必须） |
+| `--output` | `-o` | 输出文件路径 |
+| `--protocol` | `-p` | 总线协议 |
+| `--template-dir` | `-t` | 模板目录路径（可多次使用） |
+| `--debug` | `-d` | 启用调试模式（更详细的日志） |
+| `--log-file` | 无 | 日志文件路径 |
+| `--debug-info` | 无 | 在生成的Verilog文件中包含调试信息 |
+
+## 参数使用说明
+
+### 基本参数
+
+- `--config`/`-c`：（必需）指定配置文件路径，支持Excel、JSON、YAML等格式
+- `--output`/`-o`：指定生成的Verilog文件输出路径，如未指定则使用配置文件名自动生成
+
+### 总线协议参数
+
+- `--protocol`/`-p`：指定总线协议，可选值包括：
+  - `custom`：自定义总线（默认）
+  - `apb`：APB总线
+  - `ahb`：AHB总线
+  - `axi`：AXI总线
+  - `avalon`：Avalon总线
+  - `wishbone`：Wishbone总线
+
+### 模板相关参数
+
+- `--template-dir`/`-t`：指定自定义模板目录，可以多次使用该参数指定多个目录
+
+### 调试相关参数
+
+- `--debug`/`-d`：启用调试模式，会输出更详细的日志信息
+- `--log-file`：指定日志输出文件路径
+- `--debug-info`：在生成的Verilog文件中包含调试信息，用于排查问题
+
+## 命令行示例
+
+### 基本使用
+
+```bash
+# 使用Excel配置文件生成自定义总线寄存器文件
+python -m autoregfile.regfile_gen -c ./config.xlsx -o ./output.v
+
+# 使用JSON配置文件生成APB总线寄存器文件
+python -m autoregfile.regfile_gen -c ./config.json -o ./output_apb.v -p apb
+```
+
+### 使用调试功能
+
+```bash
+# 生成带调试信息的寄存器文件
+python -m autoregfile.regfile_gen -c ./config.xlsx -o ./output.v --debug-info
+
+# 启用详细日志并输出到文件
+python -m autoregfile.regfile_gen -c ./config.xlsx -o ./output.v -d --log-file ./generation.log
+```
+
+### 使用自定义模板
+
+```bash
+# 使用自定义模板目录
+python -m autoregfile.regfile_gen -c ./config.xlsx -o ./output.v -t ./my_templates
+
+# 使用多个模板目录
+python -m autoregfile.regfile_gen -c ./config.xlsx -o ./output.v -t ./templates1 -t ./templates2
+```
+
+# 调试功能详解
+
+## 调试信息功能
+
+从v1.2.0版本开始，AutoRegFile支持在生成的Verilog文件中包含调试信息，用于排查寄存器定义和生成过程中的问题。
+
+### 调试信息内容
+
+生成的调试信息包括：
+
+1. **字段位置信息**：
+   - 每个寄存器的字段数量
+   - 每个字段的名称
+   - 每个字段的位范围（high和low位）
+   - 每个字段的宽度
+
+2. **寄存器宽度信息**：
+   - 每个寄存器计算得到的总宽度
+
+### 开启调试信息
+
+调试信息默认是关闭的，可以通过以下方式开启：
+
+1. **命令行方式**：
+   ```bash
+   python -m autoregfile.regfile_gen -c ./config.xlsx -o ./output.v --debug-info
+   ```
+
+2. **Python API方式**：
+   ```python
+   from autoregfile.register_factory import get_register_factory
+   
+   factory = get_register_factory()
+   factory.generate_regfile(
+       config_file="./config.xlsx",
+       output_file="./output.v",
+       enable_debug_info=True  # 开启调试信息
+   )
+   ```
+
+### 调试信息示例
+
+下面是启用调试信息生成的Verilog文件的一部分：
+
+```verilog
+// =============================================================================
+// 自动生成的寄存器文件: test_regfile
+// 生成时间: 2023-09-01 10:15:30
+// =============================================================================
+
+// =============================================================================
+// 调试信息（仅在开启调试模式时生成）
+// =============================================================================
+// DEBUG: 字段位置信息
+// CTRL_REG 寄存器字段调试信息
+// 原始字段数量: 3
+// 字段名: enable, 位范围: high=0, low=0, width=1
+// 字段名: mode, 位范围: high=2, low=1, width=2
+// 字段名: start, 位范围: high=3, low=3, width=1
+
+// STATUS_REG 寄存器字段调试信息
+// 原始字段数量: 2
+// 字段名: busy, 位范围: high=0, low=0, width=1
+// 字段名: error, 位范围: high=1, low=1, width=1
+
+// DEBUG: 寄存器宽度信息
+// CTRL_REG 寄存器宽度: 4
+// STATUS_REG 寄存器宽度: 2
+// =============================================================================
+
+// 正常的Verilog代码...
+```
+
+## 排查常见问题
+
+### 字段位置问题
+
+如果发现寄存器中的字段位置与预期不符，请检查生成的调试信息中的字段位置信息：
+
+1. 确认每个字段的high和low位是否正确
+2. 检查是否有字段位置重叠
+3. 确认总宽度计算是否与预期一致
+
+### 寄存器宽度问题
+
+如果发现寄存器宽度计算与预期不符，请检查：
+
+1. 调试信息中的寄存器宽度是否正确
+2. 最高位的字段位置是否正确
+3. 位宽度计算是否考虑了所有字段
+
+### 调试工作流建议
+
+1. 遇到生成文件不符合预期时，首先开启调试信息
+2. 分析调试信息中的字段位置和寄存器宽度
+3. 根据分析结果修改配置文件或报告问题
+4. 重新生成并验证结果 

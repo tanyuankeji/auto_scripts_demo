@@ -1,0 +1,24 @@
+// 打印每个寄存器的所有字段信息
+{% for reg in registers %}
+// {{ reg.name }} 寄存器字段调试信息
+{% if reg.has_fields %}
+{% for field in reg.fields %}
+// 字段名: {{ field.name }}, 位范围: high={{ field.bit_range.high }}, low={{ field.bit_range.low }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+// 打印寄存器宽度计算
+{% for reg in registers %}
+{% if reg.has_fields %}
+  {% set max_high = 0 %}
+  {% for field in reg.fields %}
+    {% set field_high = field.bit_range.high %}
+    {% if field_high > max_high %}
+      {% set max_high = field_high %}
+    {% endif %}
+  {% endfor %}
+  {% set reg_width = max_high + 1 %}
+// {{ reg.name }} 最高位 = {{ max_high }}, 计算宽度 = {{ reg_width }}
+{% endif %}
+{% endfor %} 

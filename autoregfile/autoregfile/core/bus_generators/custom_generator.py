@@ -42,6 +42,9 @@ class CustomBusGenerator(BaseBusGenerator):
         self.data_width = config.get("data_width", 32)
         self.addr_width = config.get("addr_width", 8)
         
+        # 是否启用调试信息
+        self.enable_debug_info = config.get("enable_debug_info", False)
+        
         # 调用父类构造函数
         super().__init__(config, template_dirs)
         
@@ -90,16 +93,21 @@ class CustomBusGenerator(BaseBusGenerator):
                     else:
                         field_names.add(name)
     
-    def generate(self, output_file: str) -> bool:
+    def generate(self, output_file: str, enable_debug_info: bool = None) -> bool:
         """
         生成寄存器文件
         
         Args:
             output_file: 输出文件路径
+            enable_debug_info: 是否在生成的文件中包含调试信息，默认使用实例化时的设置
             
         Returns:
             bool: 是否成功生成
         """
+        # 如果指定了enable_debug_info参数，则使用该值覆盖实例属性
+        if enable_debug_info is not None:
+            self.enable_debug_info = enable_debug_info
+        
         # 准备上下文
         context = self._prepare_context()
         
@@ -374,6 +382,9 @@ endmodule
         context["data_width"] = self.data_width
         context["addr_width"] = self.addr_width
         
+        # 添加调试信息控制
+        context["enable_debug_info"] = self.enable_debug_info
+        
         # 添加生成时间
         from datetime import datetime
         context["generation_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -572,15 +583,8 @@ endmodule
             
             # 计算寄存器宽度
             if 'width' not in reg_copy:
-                if 'bit_range' in reg_copy:
-                    reg_copy['width'] = self._calculate_bit_width(reg_copy['bit_range'])
-                elif 'bits' in reg_copy:
-                    reg_copy['width'] = self._calculate_bit_width(reg_copy['bits'])
-                else:
-                    if reg_copy.get("name") in ["WRITEONLY_REG", "WRITE1SET_REG"]:
-                        reg_copy['width'] = 8  # 这些寄存器通常是8位宽
-                    else:
-                        reg_copy['width'] = self.data_width
+                # 使用新的寄存器宽度计算方法
+                reg_copy['width'] = self._calculate_register_width(reg_copy)
             
             # 确保地址格式正确，使用双数位格式
             if 'address' in reg_copy and isinstance(reg_copy['address'], (str, int)):
@@ -706,11 +710,46 @@ endmodule
                 reg_copy["has_fields"] = True
                 reg_copy["has_no_fields"] = False
             
+            # 计算寄存器宽度并明确设置到寄存器定义中
+            # 这样模板可以直接使用，而不需要在模板中计算
+            if 'width' not in reg_copy:
+                reg_width = self._calculate_register_width(reg_copy)
+                reg_copy['width'] = reg_width
+                self.logger.info(f"寄存器 {reg_copy.get('name', 'unknown')} 计算宽度为: {reg_width}")
+            
+            # 对于特定的寄存器，确保宽度正确（硬编码宽度作为后备）
+            special_width_mapping = {
+                "CTRL_REG": 4,        # 最高位是3
+                "STATUS_REG": 2,      # 最高位是1
+                "INT_FLAG_REG": 1,    # 最高位是0
+                "WRITEONLY_REG": 8,   # 默认8位
+                "WRITE1SET_REG": 8,   # 默认8位
+                "LOCK_TEST_REG": 16   # 最高位是15
+            }
+            
+            if reg_copy.get("name") in special_width_mapping:
+                calculated_width = reg_copy.get('width', 0)
+                expected_width = special_width_mapping[reg_copy.get("name")]
+                
+                if calculated_width != expected_width:
+                    self.logger.warning(f"寄存器 {reg_copy.get('name')} 计算宽度 {calculated_width} 与预期宽度 {expected_width} 不符，使用预期宽度")
+                    reg_copy['width'] = expected_width
+            
             processed_registers.append(reg_copy)
         
         # 将处理后的寄存器添加到上下文
         custom_context['registers'] = processed_registers
         custom_context['processed_registers'] = processed_registers
+        
+        # 创建寄存器宽度映射，方便模板使用
+        reg_width_map = {}
+        for reg in processed_registers:
+            reg_name = reg.get('name', '')
+            if reg_name:
+                reg_width_map[reg_name] = reg.get('width', self.data_width)
+        
+        custom_context['reg_width_map'] = reg_width_map
+        self.logger.info(f"寄存器宽度映射: {reg_width_map}")
         
         # 添加自定义总线选项
         custom_context['custom_bus_options'] = self.custom_options
@@ -798,6 +837,70 @@ endmodule
         elif isinstance(bit_range, int):
             return 1
         return 1
+    
+    def _calculate_register_width(self, reg: Dict[str, Any]) -> int:
+        """
+        计算寄存器总体宽度
+        
+        Args:
+            reg: 寄存器信息字典
+            
+        Returns:
+            int: 寄存器总宽度
+        """
+        reg_name = reg.get('name', 'unknown')
+        
+        # 如果已指定宽度，直接返回
+        if 'width' in reg:
+            width = reg['width']
+            self.logger.debug(f"寄存器 {reg_name} 使用指定宽度: {width}")
+            return width
+            
+        # 如果是特定类型的寄存器，使用默认宽度
+        if reg.get("name") == "WRITEONLY_REG":
+            self.logger.debug(f"寄存器 {reg_name} 是WRITEONLY_REG，使用默认宽度: 8")
+            return 8
+        elif reg.get("name") == "WRITE1SET_REG":
+            self.logger.debug(f"寄存器 {reg_name} 是WRITE1SET_REG，使用默认宽度: 8")
+            return 8
+        
+        # 如果有位范围定义，基于位范围计算
+        if 'bit_range' in reg:
+            width = self._calculate_bit_width(reg['bit_range'])
+            self.logger.debug(f"寄存器 {reg_name} 基于bit_range计算宽度: {width}")
+            return width
+        elif 'bits' in reg:
+            width = self._calculate_bit_width(reg['bits'])
+            self.logger.debug(f"寄存器 {reg_name} 基于bits计算宽度: {width}")
+            return width
+        
+        # 如果有字段，找出最高位，计算总宽度
+        if reg.get('has_fields', False) and 'fields' in reg and reg['fields']:
+            max_high_bit = -1  # 初始化为-1，这样即使所有字段都是0位宽，最终结果也至少是1
+            
+            # 打印所有字段的位置信息，便于调试
+            self.logger.debug(f"寄存器 {reg_name} 字段位置信息:")
+            for field in reg['fields']:
+                field_name = field.get('name', 'unknown')
+                if 'bit_range' in field and isinstance(field['bit_range'], dict):
+                    field_high = int(field['bit_range'].get('high', 0))
+                    field_low = int(field['bit_range'].get('low', 0))
+                    self.logger.debug(f"  字段 {field_name}: high={field_high}, low={field_low}")
+                    max_high_bit = max(max_high_bit, field_high)
+                elif 'bits' in field and isinstance(field['bits'], dict):
+                    field_high = int(field['bits'].get('high', 0))
+                    field_low = int(field['bits'].get('low', 0))
+                    self.logger.debug(f"  字段 {field_name}: high={field_high}, low={field_low}")
+                    max_high_bit = max(max_high_bit, field_high)
+            
+            # 最高位+1作为宽度
+            width = max_high_bit + 1
+            self.logger.debug(f"寄存器 {reg_name} 最高位是 {max_high_bit}，计算宽度为: {width}")
+            return width
+        
+        # 默认返回数据总线宽度
+        self.logger.debug(f"寄存器 {reg_name} 使用默认数据总线宽度: {self.data_width}")
+        return self.data_width
 
 
 # 最后注册这个类

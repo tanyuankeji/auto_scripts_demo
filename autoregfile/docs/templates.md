@@ -303,3 +303,164 @@ verilog_gen.save(verilog_code, "example_regfile.v")
 1. 模板使用 Jinja2 语法，支持控制流、过滤器和宏
 2. 确保模板目录结构与默认结构一致
 3. 自定义模板可能需要根据工具版本更新 
+
+## 在模板中支持调试信息功能
+
+从v1.2.0版本开始，AutoRegFile支持在生成的Verilog文件中添加调试信息，帮助开发人员更好地理解寄存器的生成过程和排查问题。本节介绍如何在自定义模板中实现调试信息控制。
+
+### 调试信息上下文变量
+
+在模板上下文中，我们提供了以下变量用于控制调试信息的显示：
+
+- `enable_debug_info`: 布尔值，表示是否启用调试信息。这个值由用户通过命令行参数`--debug-info`或API中的`enable_debug_info`参数控制。
+
+### 在模板中使用调试信息控制
+
+下面是一个模板示例，展示如何在模板中使用条件语句控制调试信息的生成：
+
+```jinja
+// =============================================================================
+// 自动生成的寄存器文件: {{ module_name }}
+// 生成时间: {{ generation_time }}
+// =============================================================================
+
+{% if enable_debug_info|default(false) %}
+// =============================================================================
+// 调试信息（仅在开启调试模式时生成）
+// =============================================================================
+// DEBUG: 字段位置信息
+{% for reg in registers %}
+// {{ reg.name }} 寄存器字段调试信息
+{% if reg.has_fields %}
+// 原始字段数量: {{ reg.fields|length }}
+{% for field in reg.fields %}
+// 字段名: {{ field.name }}, 位范围: high={{ field.bit_range.high }}, low={{ field.bit_range.low }}, width={{ field.width }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+// DEBUG: 寄存器宽度信息
+{% for reg in registers %}
+// {{ reg.name }} 寄存器宽度: {{ reg.width }}
+{% endfor %}
+// =============================================================================
+{% endif %}
+
+// 常规Verilog代码...
+```
+
+### 最佳实践
+
+1. **条件包装**：始终使用条件语句包装调试信息，确保只有在用户明确请求时才生成
+   ```jinja
+   {% if enable_debug_info|default(false) %}
+   // 调试信息内容
+   {% endif %}
+   ```
+
+2. **明确标记**：使用明显的注释标记调试信息的开始和结束，便于在生成文件中识别
+   ```jinja
+   // =============================================================================
+   // 调试信息（仅在开启调试模式时生成）
+   // =============================================================================
+   ```
+
+3. **分类信息**：将不同类型的调试信息分类展示，增强可读性
+   ```jinja
+   // DEBUG: 字段位置信息
+   // ...
+   
+   // DEBUG: 寄存器宽度信息
+   // ...
+   ```
+
+4. **提供默认值**：使用`default`过滤器为`enable_debug_info`提供默认值，增强模板的健壮性
+   ```jinja
+   {% if enable_debug_info|default(false) %}
+   ```
+
+5. **放置位置**：将调试信息放在文件开头，便于快速定位和查看
+
+### 添加自定义调试信息
+
+除了标准的字段位置和寄存器宽度信息外，你还可以添加自定义的调试信息：
+
+```jinja
+{% if enable_debug_info|default(false) %}
+// 自定义调试信息
+// 总线配置: 数据宽度={{ data_width }}, 地址宽度={{ addr_width }}
+// 总寄存器数量: {{ registers|length }}
+
+// 寄存器地址映射:
+{% for reg in registers %}
+// {{ reg.name }}: 地址=0x{{ '%08X' % reg.address|replace('0x', '')|int(16) }}
+{% endfor %}
+{% endif %}
+```
+
+### 调试复杂计算
+
+对于复杂的模板计算逻辑，可以添加中间步骤的调试信息：
+
+```jinja
+{% if enable_debug_info|default(false) %}
+// 宽度计算过程调试
+{% for reg in registers %}
+{% if reg.has_fields %}
+// {{ reg.name }} 宽度计算:
+{% set max_high = -1 %}
+{% for field in reg.fields %}
+// 考虑字段 {{ field.name }}: high={{ field.bit_range.high }}
+{% set max_high = [max_high, field.bit_range.high]|max %}
+{% endfor %}
+// 最终最高位: {{ max_high }}
+// 计算宽度: {{ max_high + 1 }}
+{% endif %}
+{% endfor %}
+{% endif %}
+```
+
+### 排查模板问题
+
+如果你的模板生成的内容不符合预期，开启调试信息可以帮助你：
+
+1. 确认上下文数据是否正确：打印关键变量的值
+2. 追踪复杂计算的中间结果：在关键步骤添加调试信息
+3. 验证条件分支执行情况：在不同条件分支添加标记，查看哪些分支被执行
+
+### 示例：排查寄存器宽度计算问题
+
+```jinja
+{% if enable_debug_info|default(false) %}
+// 排查宽度计算问题
+{% for reg in registers %}
+// {{ reg.name }} 宽度调试:
+// 1. 直接指定宽度: {{ reg.width|default('未指定') }}
+// 2. 从bit_range计算:
+{% if reg.bit_range is defined %}
+//    bit_range: {{ reg.bit_range|string }}
+//    计算宽度: {{ reg.bit_range.high - reg.bit_range.low + 1 if reg.bit_range is mapping else '无法计算' }}
+{% else %}
+//    无bit_range定义
+{% endif %}
+// 3. 从字段计算:
+{% if reg.has_fields %}
+//    字段数量: {{ reg.fields|length }}
+//    最高位字段: {{ reg.fields|sort(attribute='bit_range.high')|last|string|default('无字段') if reg.fields else '无字段' }}
+//    最高位: {{ reg.fields|map(attribute='bit_range.high')|max|default(-1) if reg.fields else '无法确定' }}
+{% else %}
+//    无字段定义
+{% endif %}
+// 最终使用的宽度: {{ reg.width|default('使用默认值 ' ~ data_width) }}
+{% endfor %}
+{% endif %}
+```
+
+### 总结
+
+调试信息是一个强大的工具，可以帮助你理解寄存器文件的生成过程，更快地排查问题。通过在自定义模板中实现良好的调试支持，你可以显著提高开发效率和代码质量。实践中应谨记：
+
+1. 调试信息应当是有选择性的，不要默认启用
+2. 调试信息应当是全面的，覆盖关键数据结构和计算过程
+3. 调试信息应当是可读的，使用清晰的格式和分类
+4. 调试信息不应影响生成代码的功能 

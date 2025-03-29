@@ -3,6 +3,28 @@
 // 生成时间: {{ generation_time }}
 // =============================================================================
 
+{% if enable_debug_info|default(false) %}
+// =============================================================================
+// 调试信息（仅在开启调试模式时生成）
+// =============================================================================
+// DEBUG: 字段位置信息
+{% for reg in registers %}
+// {{ reg.name }} 寄存器字段调试信息
+{% if reg.has_fields %}
+// 原始字段数量: {{ reg.fields|length }}
+{% for field in reg.fields %}
+// 字段名: {{ field.name }}, 位范围: high={{ field.bit_range.high }}, low={{ field.bit_range.low }}, width={{ field.width }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+// DEBUG: 寄存器宽度信息
+{% for reg in registers %}
+// {{ reg.name }} 寄存器宽度: {{ reg.width }}
+{% endfor %}
+// =============================================================================
+{% endif %}
+
 `timescale 1ns / 1ps
 
 module {{ module_name }} (
@@ -80,17 +102,24 @@ localparam {{ reg.name|upper }}_{{ field.name|upper }}_WIDTH = {{ field_width }}
 {% endfor %}
 
 // =============================================================================
+// 寄存器位宽定义 - 架构优化：使用预计算的寄存器位宽
+// =============================================================================
+{% for reg in registers %}
+localparam {{ reg.name }}_WIDTH = {{ reg.width }};
+{% endfor %}
+
+// =============================================================================
 // 控制信号定义
 // =============================================================================
 
 // 控制信号
-wire                              write_active = chip_select && write_en;
-wire                              read_active  = chip_select && read_en;
-assign                            data_valid   = read_active;
+wire write_active = chip_select && write_en;
+wire read_active = chip_select && read_en;
+assign data_valid = read_active;
 
 // 地址选择信号
 {% for reg in registers %}
-wire                              sel_{{ reg.name|lower }} = (addr == 8'h{{ '%02X' % reg.address|replace('0x', '')|int(16) if reg.address is string else '%02X' % reg.address }});
+wire sel_{{ reg.name|lower }} = (addr == 8'h{{ '%02X' % reg.address|replace('0x', '')|int(16) if reg.address is string else '%02X' % reg.address }});
 {% endfor %}
 
 // =============================================================================
@@ -98,22 +127,8 @@ wire                              sel_{{ reg.name|lower }} = (addr == 8'h{{ '%02
 // =============================================================================
 
 {% for reg in registers %}
-{# 计算寄存器的实际位宽 #}
-{% if reg.has_fields %}
-  {# 找出具有最高bit位置的字段 #}
-  {% set max_bit = 0 %}
-  {% for field in reg.fields %}
-    {% set field_high = field.bit_range.high %}
-    {% if field_high > max_bit %}
-      {% set max_bit = field_high %}
-    {% endif %}
-  {% endfor %}
-  {% set reg_width = max_bit + 1 %}
-{% else %}
-  {% set reg_width = reg.width|default(data_width) %}
-{% endif %}
 // {{ reg.name }} 寄存器 - {{ reg.description|default('') }}
-reg     [{{ reg_width-1 }}:0]       {{ reg.name|lower }}_reg;
+reg [{{ reg.name|upper }}_WIDTH-1:0] {{ reg.name|lower }};
 {% endfor %}
 
 {% for reg in registers %}
@@ -123,7 +138,7 @@ reg     [{{ reg_width-1 }}:0]       {{ reg.name|lower }}_reg;
 {% set field_high = field.bit_range.high %}
 {% set field_low = field.bit_range.low %}
 {% set field_width = field_high - field_low + 1 %}
-reg     [{{ field_width-1 }}:0]       {{ reg.name|lower }}_{{ field.name|lower }}_reg;  // {{ field.description|default('') }}
+reg [{{ field_width-1 }}:0] {{ reg.name|lower }}_{{ field.name|lower }}_reg;  // {{ field.description|default('') }}
 {% endfor %}
 {% endif %}
 {% endfor %}
@@ -136,15 +151,23 @@ reg     [{{ field_width-1 }}:0]       {{ reg.name|lower }}_{{ field.name|lower }
 {% if reg.has_fields %}
 // {{ reg.name }} 寄存器组合
 always @(*) begin
-    {{ reg.name|lower }}_reg = { {% for field in reg.fields|sort(attribute='bit_range.high', reverse=true) %}
-        {% if not loop.first %}, {% endif %}
-        {% set padding = field.bit_range.high - field.bit_range.low + 1 %}
-        {% if padding > 1 %}
-        {{ reg.name|lower }}_{{ field.name|lower }}_reg
-        {% else %}
-        {{ reg.name|lower }}_{{ field.name|lower }}_reg
+    {{ reg.name|lower }} = {
+        {(32-{{ reg.name|upper }}_WIDTH){1'b0}},  // 高位填充
+{% set prev_field_low = 0 %}
+{% set prev_field_high = 0 %}
+{% for field in reg.fields|sort(attribute='bit_range.high', reverse=true) %}
+    {% set field_high = field.bit_range.high %}
+    {% set field_low = field.bit_range.low %}
+    {% if not loop.first %}
+        {% if loop.first == False and field_high < prev_field_low - 1 %}
+        {({{ prev_field_low - field_high - 1 }}){1'b0}},  // 中间位填充
         {% endif %}
-    {% endfor %} };
+    {% endif %}
+    {% set prev_field_low = field_low %}
+    {% set prev_field_high = field_high %}
+        {{ reg.name|lower }}_{{ field.name|lower }}_reg{% if not loop.last %},{% endif %}
+{% endfor %}
+    };
 end
 
 // {{ reg.name }} 字段接口连接
@@ -155,7 +178,7 @@ assign {{ reg.name|lower }}_{{ field.name|lower }}_o = {{ reg.name|lower }}_{{ f
 {% endfor %}
 {% else %}
 {% if reg.type in ['ReadOnly', 'ReadWrite'] %}
-assign {{ reg.name|lower }}_o = {{ reg.name|lower }}_reg;
+assign {{ reg.name|lower }}_o = {{ reg.name|lower }};
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -167,14 +190,26 @@ always @(*) begin
     read_data = {{ data_width }}'d0;  // 默认值
     
     if (read_active) begin
-        case (1'b1)  // 优先级编码器
-            {% for reg in registers %}
-            {% if reg.type != 'WriteOnly' %}
-            sel_{{ reg.name|lower }}  : read_data = {% if reg.name == 'WRITE1SET_REG' %}{ {{ data_width }}'d0 | {{ reg.name|lower }}_reg }{% else %}{{ reg.name|lower }}_reg{% endif %};
+        {% for reg in registers %}
+        {% if loop.first %}
+        if (sel_{{ reg.name|lower }}) begin
+        {% else %}
+        else if (sel_{{ reg.name|lower }}) begin
+        {% endif %}
+            {% if reg.has_fields %}
+            read_data = {(32-{{ reg.name|upper }}_WIDTH){1'b0}, {{ reg.name|lower }}};
+            {% elif reg.name == 'WRITEONLY_REG' %}
+            read_data = {{ data_width }}'d0; // 只写寄存器，读取返回0
+            {% elif reg.name == 'WRITE1SET_REG' %}
+            read_data = {(32-{{ reg.name|upper }}_WIDTH){1'b0}, {{ reg.name|lower }}};
+            {% else %}
+            read_data = {(32-{{ reg.name|upper }}_WIDTH){1'b0}, {{ reg.name|lower }}};
             {% endif %}
-            {% endfor %}
-            default   : read_data = {{ data_width }}'d0;
-        endcase
+        end
+        {% endfor %}
+        else begin
+            read_data = {{ data_width }}'d0;
+        end
     end
 end
 
@@ -182,153 +217,80 @@ end
 // 寄存器更新逻辑
 // =============================================================================
 {% for reg in registers %}
-{% if reg.has_fields == False %}
-// {{ reg.name }} 寄存器 (无子字段)
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        {{ reg.name|lower }}_reg <= {{ reg.width|default(data_width) }}'h{{ '%X' % reg.reset_value if reg.reset_value is number else reg.reset_value|default('0')|replace('0x', '')|replace('0h', '') }};
-    end
-    else begin
-        {% set reg_priority = reg.access_priority|default(global_access_priority|default('sw')) %}
-        {% if reg_priority == 'hw' %}
-        // 硬件优先
-        if ({{ reg.name|lower }}_wen) begin
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_i;
-        end
-        else if (write_active && sel_{{ reg.name|lower }}) begin
-            {% if reg.type == 'ReadWrite' %}
-            {{ reg.name|lower }}_reg <= write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'WriteOnly' %}
-            {{ reg.name|lower }}_reg <= write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write1Clean' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write0Clean' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write1Set' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write0Set' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | ~write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% endif %}
-        end
-        {% else %}
-        // 软件优先
-        if (write_active && sel_{{ reg.name|lower }}) begin
-            {% if reg.type == 'ReadWrite' %}
-            {{ reg.name|lower }}_reg <= write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'WriteOnly' %}
-            {{ reg.name|lower }}_reg <= write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write1Clean' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & ~write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write0Clean' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg & write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write1Set' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% elif reg.type == 'Write0Set' %}
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_reg | ~write_data{% if reg.width|default(data_width) < data_width %}[{{ reg.width|default(data_width)-1 }}:0]{% endif %};
-            {% endif %}
-        end
-        else if ({{ reg.name|lower }}_wen) begin
-            {{ reg.name|lower }}_reg <= {{ reg.name|lower }}_i;
-        end
-        {% endif %}
-    end
-end
-{% else %}
+{% if reg.has_fields %}
 // {{ reg.name }} 子字段寄存器更新
 {% for field in reg.fields %}
-{% set field_high = field.bit_range.high %}
-{% set field_low = field.bit_range.low %}
-{% set field_width = field_high - field_low + 1 %}
-// {{ field.name_upper|default(field.name|upper) }} 字段
+// {{ field.name|upper }} 字段
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         // 使用字段特定的复位值或从寄存器复位值中提取
-        {% if field.reset_value is defined %}
-        {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ field_width }}'h{{ '%X' % field.reset_value if field.reset_value is number else field.reset_value|default('0')|replace('0x', '')|replace('0h', '') }};
-        {% else %}
-        {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ field_width }}'h0; // 默认复位值
-        {% endif %}
+        {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ field.width }}'h{{ '%X' % field.reset_value|replace('0x', '')|int(16) if field.reset_value is string else '%X' % field.reset_value|default(0) }};
     end
     else begin
-        {% set field_priority = field.access_priority|default(reg.access_priority|default(global_access_priority|default('sw'))) %}
-        {% if field_priority == 'hw' %}
-        // 硬件优先
-        if ({{ reg.name|lower }}_{{ field.name|lower }}_wen) begin
-            {% if field.type == 'Write1Pulse' or field.type == 'Write0Pulse' %}
-            // {{ field.type }} - 脉冲处理
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_i;
-            // 在下一个周期会自动清零
-            {% else %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_i;
-            {% endif %}
-        end
-        else if (write_active && sel_{{ reg.name|lower }}) begin
-            {% if field.type == 'ReadWrite' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'WriteOnly' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'ReadOnly' %}
-            // 只读字段，忽略软件写入
-            {% elif field.type == 'Write1Clean' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg & ~write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write0Clean' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg & write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write1Set' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg | write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write0Set' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg | ~write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write1Pulse' %}
-            // 写1脉冲，下一个周期自动清零
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write0Pulse' %}
-            // 写0脉冲，下一个周期自动清零
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= ~write_data[{{ field_high }}:{{ field_low }}];
-            {% endif %}
-        end
-        {% if field.type == 'Write1Pulse' or field.type == 'Write0Pulse' %}
-        else begin
-            // 脉冲类型字段在没有写入时自动清零
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ field_width }}'h0;
-        end
-        {% endif %}
-        {% else %}
         // 软件优先
         if (write_active && sel_{{ reg.name|lower }}) begin
-            {% if field.type == 'ReadWrite' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'WriteOnly' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'ReadOnly' %}
+            {%- if field.type == 'ReadOnly' %}
             // 只读字段，忽略软件写入
-            {% elif field.type == 'Write1Clean' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg & ~write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write0Clean' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg & write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write1Set' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg | write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write0Set' %}
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg | ~write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write1Pulse' %}
-            // 写1脉冲，下一个周期自动清零
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field_high }}:{{ field_low }}];
-            {% elif field.type == 'Write0Pulse' %}
-            // 写0脉冲，下一个周期自动清零
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= ~write_data[{{ field_high }}:{{ field_low }}];
-            {% endif %}
+            {%- elif field.type == 'WritePulse' or field.type == 'Write1Pulse' %}
+            // 写脉冲，下一个周期自动清零
+            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field.bit_range.high }}:{{ field.bit_range.low }}];
+            {%- elif field.type == 'Write1Set' %}
+            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg | write_data[{{ field.bit_range.high }}:{{ field.bit_range.low }}];
+            {%- elif field.type == 'Write1Clean' or field.type == 'Write1Clear' %}
+            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_reg & ~write_data[{{ field.bit_range.high }}:{{ field.bit_range.low }}];
+            {%- else %}
+            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= write_data[{{ field.bit_range.high }}:{{ field.bit_range.low }}];
+            {%- endif %}
         end
         else if ({{ reg.name|lower }}_{{ field.name|lower }}_wen) begin
             {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ reg.name|lower }}_{{ field.name|lower }}_i;
         end
-        {% if field.type == 'Write1Pulse' or field.type == 'Write0Pulse' %}
+        {%- if field.type == 'WritePulse' or field.type == 'Write1Pulse' %}
         else begin
             // 脉冲类型字段在没有写入时自动清零
-            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ field_width }}'h0;
+            {{ reg.name|lower }}_{{ field.name|lower }}_reg <= {{ field.width }}'h0;
         end
-        {% endif %}
-        {% endif %}
+        {%- else %}
+        end
+        {%- endif %}
     end
 end
 {% endfor %}
+
+{% else %}
+// {{ reg.name }} 寄存器 (无子字段)
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        {{ reg.name|lower }} <= {{ data_width if reg.width > data_width else reg.width }}'h{{ '%X' % reg.reset_value|replace('0x', '')|int(16) if reg.reset_value is string else '%X' % reg.reset_value|default(0) }};
+    end
+    else begin
+        // 软件优先
+        if (write_active && sel_{{ reg.name|lower }}) begin
+            {%- if reg.type == 'ReadOnly' %}
+            // 只读寄存器，忽略软件写入
+            {%- elif reg.type == 'Write1Set' or reg.type == 'WRITE1SET_REG' %}
+            {{ reg.name|lower }} <= {{ reg.name|lower }} | write_data[{{ reg.width-1 if reg.width else data_width-1 }}:0];
+            {%- elif reg.type == 'Write1Clean' or reg.type == 'Write1Clear' %}
+            {{ reg.name|lower }} <= {{ reg.name|lower }} & ~write_data[{{ reg.width-1 if reg.width else data_width-1 }}:0];
+            {%- elif reg.type == 'WritePulse' or reg.type == 'Write1Pulse' %}
+            {{ reg.name|lower }} <= write_data[{{ reg.width-1 if reg.width else data_width-1 }}:0];
+            {%- else %}
+            {{ reg.name|lower }} <= write_data[{{ reg.width-1 if reg.width else data_width-1 }}:0];
+            {%- endif %}
+        end
+        else if ({{ reg.name|lower }}_wen) begin
+            {{ reg.name|lower }} <= {{ reg.name|lower }}_i;
+        end
+        {%- if reg.type == 'WritePulse' or reg.type == 'Write1Pulse' %}
+        else begin
+            // 脉冲类型寄存器在没有写入时自动清零
+            {{ reg.name|lower }} <= {{ data_width if reg.width > data_width else reg.width }}'h0;
+        end
+        {%- else %}
+        end
+        {%- endif %}
+    end
+end
 {% endif %}
 
 {% endfor %}

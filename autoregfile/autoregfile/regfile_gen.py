@@ -27,6 +27,8 @@ def main():
     parser.add_argument("-t", "--template-dir", dest="template_dir", action="append", help="模板目录路径")
     parser.add_argument("-d", "--debug", dest="debug", action="store_true", help="启用调试模式")
     parser.add_argument("--log-file", dest="log_file", help="日志文件路径")
+    parser.add_argument("--debug-info", dest="debug_info", action="store_true", 
+                      help="在生成的寄存器文件中包含调试信息")
     
     args = parser.parse_args()
     
@@ -60,7 +62,8 @@ def main():
     success = factory.generate_regfile(
         config_file=args.config_file,
         output_file=args.output_file,
-        bus_protocol=args.bus_protocol
+        bus_protocol=args.bus_protocol,
+        enable_debug_info=args.debug_info
     )
     
     # 根据结果设置退出码
