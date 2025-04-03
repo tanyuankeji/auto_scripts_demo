@@ -1,0 +1,257 @@
+`define DELAY(N, clk) begin \
+	repeat(N) @(posedge clk);\
+	#1ps;\
+end
+
+{% if with_verification %}
+import {{ top_module }}_pkg::*;
+{% endif %}
+
+module testbench();
+
+//-------------------------------------{{{common cfg
+timeunit 1ns;
+timeprecision 1ps;
+initial $timeformat(-9,3,"ns",6);
+
+string tc_name;
+int tc_seed;
+
+initial begin
+    if(!$value$plusargs("tc_name=%s", tc_name)) $error("no tc_name!");
+    else $display("tc name = %0s", tc_name);
+    if(!$value$plusargs("ntb_random_seed=%0d", tc_seed)) $error("no tc_seed");
+    else $display("tc seed = %0d", tc_seed);
+end
+//-------------------------------------}}}
+
+{% if parameters %}
+//-------------------------------------{{{parameter declare
+{% for param in parameters %}
+parameter {{ param }} = {{ param_dict[param] }};
+{% endfor %}
+//-------------------------------------}}}
+{% endif %}
+
+//-------------------------------------{{{signal declare
+{% for sig in signals %}
+logic {{ sig.width }} {{ sig.name }};
+{% endfor %}
+
+{# 检查时钟和复位信号是否在信号列表中 #}
+{% set has_clk = false %}
+{% set has_rst = false %}
+{% for sig in signals %}
+{% if sig.name == clk_name %}
+{% set has_clk = true %}
+{% endif %}
+{% if sig.name == rst_name %}
+{% set has_rst = true %}
+{% endif %}
+{% endfor %}
+
+{# 如果没有找到时钟或复位信号，添加它们 #}
+{% if not has_clk %}
+logic {{ clk_name }};
+{% endif %}
+{% if not has_rst %}
+logic {{ rst_name }};
+{% endif %}
+//-------------------------------------}}}
+
+//-------------------------------------{{{clk/rst cfg
+// 初始化时钟和复位信号
+initial begin
+    {{ clk_name }} = 1'b0;
+    {{ rst_name }} = 1'b0;
+end
+
+// 时钟生成
+initial forever #5ns {{ clk_name }} = ~{{ clk_name }};
+
+// 复位控制
+initial begin
+    {{ rst_name }} = 1'b0;
+	`DELAY(30, {{ clk_name }});
+	{{ rst_name }} = 1'b1;
+end
+
+// 测试超时控制
+initial begin
+    #100000ns $finish;
+end
+//-------------------------------------}}}
+
+//-------------------------------------{{{valid sig assign
+{% for sig in signals if sig.port == "input" and sig.name != clk_name and sig.name != rst_name and sig.valid_en() == 1 %}
+always @(posedge {{ clk_name }} or negedge {{ rst_name }})begin
+    if(~{{ rst_name }})begin
+        {{ sig.name }} <= 0;
+    end
+    else if({{ sig.ready_sig }} || ~{{ sig.name }})begin
+        {{ sig.name }} <= $urandom;
+    end
+end
+
+{% endfor %}
+//-------------------------------------}}}
+
+//-------------------------------------{{{ready sig assign
+{% for sig in signals if sig.port == "input" and sig.name != clk_name and sig.name != rst_name and sig.ready_en() == 1 %}
+always @(posedge {{ clk_name }} or negedge {{ rst_name }})begin
+    if(~{{ rst_name }})begin
+        {{ sig.name }} <= 0;
+    end
+    else begin
+        {{ sig.name }} <= $urandom;
+    end
+end
+
+{% endfor %}
+//-------------------------------------}}}
+
+//-------------------------------------{{{data sig assign
+{% for sig in signals if sig.port == "input" and sig.name != clk_name and sig.name != rst_name and sig.find_valid_sig == 1 %}
+always @(posedge {{ clk_name }} or negedge {{ rst_name }})begin
+    if(~{{ rst_name }})begin
+        {{ sig.name }} <= 'x;
+    end
+    {% if sig.find_ready_sig == 1 %}
+    else if({{ sig.valid_sig }} && {{ sig.ready_sig }})begin
+        {{ sig.name }} <= $urandom;
+    end
+    {% endif %}
+    else if({{ sig.valid_sig }} == 0)begin
+        {{ sig.name }} <= $urandom;
+    end
+end
+
+{% endfor %}
+//-------------------------------------}}}
+
+//-------------------------------------{{{other sig assign
+initial begin
+{% for sig in signals if sig.port == "input" and sig.name != clk_name and sig.name != rst_name and sig.valid_en() != 1 and sig.ready_en() != 1 and sig.find_valid_sig != 1 %}
+    {{ sig.name }} = $urandom;
+{% endfor %}
+    `DELAY(50, {{ clk_name }});
+end
+//-------------------------------------}}}
+
+//-------------------------------------{{{rtl inst
+{% if parameters %}
+{{ top_module }} #(
+{% for param in parameters %}
+    .{{ param }}({{ param }}){% if not loop.last %},{% endif %}
+{% endfor %}
+) 
+u_{{ top_module }}(
+{% else %}
+{{ top_module }} u_{{ top_module }}(
+{% endif %}
+{% for sig in signals %}
+    .{{ sig.name }}({{ sig.name }}){% if not loop.last %},{% endif %}
+{% endfor %}
+);
+//-------------------------------------}}}
+
+{% if with_verification %}
+//-------------------------------------{{{auto_verification
+task in_queue_gain();
+  while(1)begin
+    @(negedge {{ clk_name }});
+{% for valid_name in valid_signals %}
+{% set valid = signal_dict[valid_name] %}
+{% if valid.bus_list and valid.port == "input" %}
+    if({{ valid.name }} && {{ valid.ready_sig }})begin
+      {{ valid.name }}_struct {{ valid.name }}_dat;
+{% for sig in valid.bus_list %}
+      {{ valid.name }}_dat.{{ sig.name }} = {{ sig.name }};
+{% endfor %}
+      {{ valid.name }}_bus_q.push_back({{ valid.name }}_dat);
+    end//if-end 
+{% endif %}
+{% endfor %}
+  end//while-end 
+endtask: in_queue_gain
+
+task out_queue_gain();
+  while(1)begin
+    @(negedge {{ clk_name }});
+{% for valid_name in valid_signals %}
+{% set valid = signal_dict[valid_name] %}
+{% if valid.bus_list and valid.port == "output" %}
+    if({{ valid.name }} && {{ valid.ready_sig }})begin
+      {{ valid.name }}_struct {{ valid.name }}_dat;
+{% for sig in valid.bus_list %}
+      {{ valid.name }}_dat.{{ sig.name }} = {{ sig.name }};
+{% endfor %}
+      {{ valid.name }}_bus_q.push_back({{ valid.name }}_dat);
+    end//if-end 
+{% endif %}
+{% endfor %}
+  end//while-end 
+endtask: out_queue_gain
+
+task rm_queue_gain();
+{% for valid_name in valid_signals %}
+{% set valid = signal_dict[valid_name] %}
+{% if valid.bus_list %}
+  {{ valid.name }}_struct {{ valid.name }}_dat;
+{% endif %}
+{% endfor %}
+  //while(1)begin
+{% for valid_name in valid_signals %}
+{% set valid = signal_dict[valid_name] %}
+{% if valid.bus_list and valid.port == "input" %}
+    //wait({{ valid.name }}_bus_q.size > 0);
+    //{{ valid.name }}_dat = {{ valid.name }}_bus_q.pop_front();
+{% endif %}
+{% if valid.bus_list and valid.port == "output" %}
+    //rm_q.push_back({{ valid.name }}_dat);
+{% endif %}
+{% endfor %}
+  //end
+endtask: rm_queue_gain
+
+{% if check_valid %}
+task queue_check();
+  while(1)begin
+    {{ check_valid }}_struct rm_data;
+    {{ check_valid }}_struct dual_data;
+    wait({{ check_valid }}_bus_q.size() > 0);
+    dual_data = {{ check_valid }}_bus_q.pop_front();
+    if(rm_q.size() == 0) begin
+      $display("dual_data = %0p, rm_queue.size = 0", dual_data);
+      error_cnt += 1;
+    end
+    else begin
+      rm_data = rm_q.pop_front();
+      if(dual_data != rm_data)begin
+        error_cnt += 1;
+        $display("dual_data(%0p) != rm_data(%0p) at %t", dual_data, rm_data, $realtime);
+      end
+      else begin
+        //$display("dual_data(%0p) == rm_data(%0p) at %t", dual_data, rm_data, $realtime);
+      end
+    end
+    if(error_cnt >= ERROR_DEBUG_CNT) begin
+      $display("Check Error!!!");
+      $finish;
+    end
+  end
+endtask: queue_check
+{% endif %}
+
+initial begin
+  fork
+    in_queue_gain();
+    out_queue_gain();
+    rm_queue_gain();
+    if(check_en == 1) queue_check();
+  join_none
+end
+//-------------------------------------}}}
+{% endif %}
+
+endmodule 

@@ -1,0 +1,40 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+自动生成Testbench脚本启动器
+
+此脚本是autotest工具的入口点，它将转发所有参数到主程序
+
+用法:
+    ./autotest -f <Verilog文件> [选项]
+    ./autotest --demo
+
+选项:
+    -f, --file <文件>           指定Verilog文件路径
+    -o, --output <目录>         指定输出目录，默认为当前目录
+    -v, --verification          生成自动验证环境
+    -d, --debug                 开启调试模式
+    --demo                      生成演示环境
+    -t, --template <目录>       指定自定义模板路径
+    --tb-name <前缀>            指定testbench名称前缀，默认为"testbench"
+    --clk-name <名称>           指定时钟信号名称，默认为"clk"
+    --rst-name <名称>           指定复位信号名称，默认为"rst_n"
+    --rel-path <路径>           指定输出文件的相对路径，默认为"."
+"""
+
+import sys
+import os
+from pathlib import Path
+
+# 获取当前脚本所在目录
+script_dir = Path(__file__).absolute().parent
+
+# 将当前目录添加到系统路径
+sys.path.insert(0, str(script_dir))
+
+# 直接导入当前目录的auto_tb模块
+from auto_tb import main
+
+if __name__ == "__main__":
+    main()
